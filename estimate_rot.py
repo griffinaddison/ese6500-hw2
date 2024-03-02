@@ -56,7 +56,12 @@ import time as TIME
 #     return Quaternion(scalar=mean_quaternion[0], vec=mean_quaternion[1:4])
 
 
+def preventQuatJump(q):
+    if q.scalar() < 0:
+        # q.scalar() = -q.scalar()
+        # q.vec() = -q.vec()
 
+        q = Quaternion(scalar = -q.scalar(), vec = -q.vec())
 
 # def skew(v):
 #     x, y, z = v
@@ -330,6 +335,7 @@ def generate_sigma_points(mu, cov):
         
 
         xi_q = (vec2quat(mu[:4]) * aa2quat(variation[:3]))
+        # preventQuatJump(xi_q)
         # xi_q.normalize()
         xi_q = xi_q.q.reshape(4, 1)
 
@@ -356,6 +362,7 @@ def get_distribution_from_quaternions(quats, quat_initial_guess):
             quat = vec2quat(quats[i])
             ei_quat = quat * mean.inv()
             ei_quat.normalize()
+            # preventQuatJump(ei_quat)
             ei = ei_quat.axis_angle()
 
             range_bounding = (np.mod(np.linalg.norm(ei) + np.pi, 2 * np.pi) - np.pi) / np.linalg.norm(ei)
@@ -365,8 +372,9 @@ def get_distribution_from_quaternions(quats, quat_initial_guess):
         ei_mean_quat = aa2quat(ei_mean, normalize=True)
         mean = (ei_mean_quat * mean)
         mean.normalize()
+        # preventQuatJump(mean)
         ## Check if error is small enough to terminate
-        threshold = 1e-7
+        threshold = 1e-10
 
         
         if (np.linalg.norm(ei_mean) < threshold):
@@ -426,9 +434,6 @@ def predict_state_distribution(sigma_points, curr_state, dt):
 
     return mean, covariance
 
-
-
-
 def initialize_variables():
 
 
@@ -463,6 +468,7 @@ def g(state):
 
     g_prime = q_k.inv() * g * q_k
     g_prime.normalize()
+    # preventQuatJump(g_prime)
 
     y_rot = state[4:]
     y_acc = g_prime.vec().reshape(-1, 1)
@@ -490,6 +496,7 @@ def f(x_k, dt):
     q_delta = aa2quat(omega_k * dt)
 
     q_kp1 = q_k * q_delta
+    # preventQuatJump(q_kp1)
     omega_kp1 = omega_k
 
     x_kp1 = np.vstack((q_kp1.q.reshape(4, 1),
@@ -522,6 +529,8 @@ def estimate_rot(data_num=1, time_steps=999999):
     setup_time = TIME.perf_counter() - tic
 
 
+    ukf_orientations = np.zeros((T, 4))
+    ukf_orientations[0, 0] = 1
     roll = np.zeros((T))
     pitch = np.zeros((T))
     yaw = np.zeros((T))
@@ -554,6 +563,7 @@ def estimate_rot(data_num=1, time_steps=999999):
            
             r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
             r_W.normalize()
+            # preventQuatJump(r_W)
             Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
                            Xi[i, -3:] - mu_kp1gk[-3:]))
 
@@ -568,11 +578,35 @@ def estimate_rot(data_num=1, time_steps=999999):
         Kinnovation = K @ innovation
         
 
-        q_kp1gkp1 = vec2quat(mu_kp1gk[:4]) * aa2quat(Kinnovation[:3])
+        # q_kp1gkp1 = vec2quat(mu_kp1gk[:4]) * aa2quat(Kinnovation[:3])
+
+        q_kp1gkp1 = aa2quat(Kinnovation[:3]) * vec2quat(mu_kp1gk[:4]) 
         q_kp1gkp1.normalize()
+        # preventQuatJump(q_kp1gkp1)
         mu_kp1gkp1 = np.vstack((q_kp1gkp1.q.reshape(4, 1),
                                 mu_kp1gk[-3:] + Kinnovation[-3:]))
         sigma_kp1gkp1 = sigma_kp1gk - K @ sigma_yy @ K.T
+
+
+
+        ## Make sure quat sign doesn't flip
+        previous_max_element_idx = np.argmax(np.abs(ukf_orientations[k]))
+
+
+        prev_element = ukf_orientations[k, previous_max_element_idx]
+        new_element = q_kp1gkp1.q[previous_max_element_idx]
+        if np.sign(prev_element) != np.sign(new_element):
+
+            print("prev quat", ukf_orientations[k])
+            print("prevmax element idx", previous_max_element_idx)
+            print("next raw quat", q_kp1gkp1.q)
+            q_kp1gkp1 = vec2quat(-1 * q_kp1gkp1.q)
+           
+            print("fixed quat", q_kp1gkp1.q)
+        ukf_orientations[k+1] = q_kp1gkp1.q
+    
+        
+
 
 
 
@@ -582,6 +616,11 @@ def estimate_rot(data_num=1, time_steps=999999):
         # For next loop:
         mu_kgk = mu_kp1gkp1
         sigma_kgk = sigma_kp1gkp1
+
+
+    ukf_orientations_rpy = roll, pitch, yaw
+
+    plot(ukf_orientations, ukf_orientations_rpy, data_num)
 
 
 
@@ -610,16 +649,16 @@ def get_vicon_data(data_num=1):
 
     vicon_rotation_matrices = vicon["rots"].astype(float).transpose((2, 0, 1))
 
-    vicon_orientations = np.zeros(vicon_rotation_matrices.shape[0], dtype=Quaternion)
+    vicon_orientations = np.zeros((vicon_rotation_matrices.shape[0], 4))
     for i in range(vicon_rotation_matrices.shape[0]):
         q = Quaternion()
         q.from_rotm(vicon_rotation_matrices[i])
-        vicon_orientations[i] = q
+        vicon_orientations[i, :] = q.q
 
     vicon_orientations_rpy = np.zeros((vicon_orientations.shape[0], 3))
 
     for t in range(vicon_orientations_rpy.shape[0]):
-        q = vicon_orientations[t]
+        q = vec2quat(vicon_orientations[t])
         vicon_orientations_rpy[t] = q.euler_angles()
 
 
@@ -637,11 +676,11 @@ def get_vicon_data(data_num=1):
 
 
 
-def plotRpy(data_num=1, time_steps=999999):
+def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
 
 
 
-    ukf_orientations_rpy = estimate_rot(data_num, time_steps)
+    # ukf_orientations_rpy = estimate_rot(data_num, time_steps)
     _, _, _, imu_observations = get_calibrated_imu_data(data_num)
 
     vicon_orientations_rpy, vicon_orientations, time = get_vicon_data(data_num)
@@ -656,7 +695,7 @@ def plotRpy(data_num=1, time_steps=999999):
         imu_rpy[i, 2] = 0
  
 
-    plt.figure()
+    plt.figure(1)
     plt.subplot(3, 1, 1)
     # ROLL
     plt.plot(time[:T], vicon_orientations_rpy[:T, 0], 
@@ -674,6 +713,7 @@ def plotRpy(data_num=1, time_steps=999999):
              label="pitch_ufk", linestyle='dotted', color='g', alpha=0.4)
     plt.plot(time[:T], imu_rpy[:T, 1],
              label="pitch_imu", linestyle='solid', color='g', alpha=0.4)
+    plt.legend()
     # YAW
     plt.subplot(3, 1, 3)
     plt.plot(time[:T], vicon_orientations_rpy[:T, 2], 
@@ -684,12 +724,46 @@ def plotRpy(data_num=1, time_steps=999999):
     
     plt.title("RPY vicon vs UKF")
     plt.legend()
+    # plt.show()
+
+
+    print("ukf_orientations.shape", ukf_orientations.shape)
+    plt.figure(2)
+    plt.subplot(2, 1, 1)
+    plt.plot(time[:T], ukf_orientations[:T, 0],
+             label="w")
+    plt.plot(time[:T], ukf_orientations[:T, 1],
+             label="x")
+    plt.plot(time[:T], ukf_orientations[:T, 2],
+             label="y")
+    plt.plot(time[:T], ukf_orientations[:T, 3],
+             label="z")
+    plt.legend()
+    plt.title("UKF Orientation quaternion")
+
+
+    print("vicon_orientations.shape", vicon_orientations.shape)
+    plt.subplot(2, 1, 2)
+    plt.plot(time[:T], vicon_orientations[:T, 0],
+             label="w")
+    plt.plot(time[:T], vicon_orientations[:T, 1],
+             label="x")
+    plt.plot(time[:T], vicon_orientations[:T, 2],
+             label="y")
+    plt.plot(time[:T], vicon_orientations[:T, 3],
+             label="z")
+    plt.legend()
+    plt.title("Vicon Orientation quaternion")
+
     plt.show()
 
 
 
 
-plotRpy(1)
+
+        
+estimate_rot(1)
+# plot(1)
 
 
 
