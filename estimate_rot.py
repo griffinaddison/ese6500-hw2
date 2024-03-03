@@ -350,7 +350,7 @@ def generate_sigma_points(mu, cov):
 
 
 
-def get_distribution_from_quaternions(quats, quat_initial_guess):
+def quat_average(quats, quat_initial_guess=Quaternion()):
     ## Initialize
     mean = vec2quat(quat_initial_guess)
     covariance = np.eye(3) * 0.001
@@ -364,6 +364,7 @@ def get_distribution_from_quaternions(quats, quat_initial_guess):
             ei_quat.normalize()
             # preventQuatJump(ei_quat)
             ei = ei_quat.axis_angle()
+
 
             range_bounding = (np.mod(np.linalg.norm(ei) + np.pi, 2 * np.pi) - np.pi) / np.linalg.norm(ei)
             Errors[i, :] = ei * range_bounding
@@ -383,7 +384,7 @@ def get_distribution_from_quaternions(quats, quat_initial_guess):
             # print("\nGD completed after ", iter, " iterations.")
             for e in Errors:
                 covariance += w * e @ e.T
-            return mean, covariance
+            return mean.q, covariance
     w = 1 / (2 * n)
     covariance = np.zeros((3, 3))
     # print("GD FAILED\n\n\n")
@@ -392,47 +393,51 @@ def get_distribution_from_quaternions(quats, quat_initial_guess):
     return mean, covariance
 
 
-def predict_state_distribution(sigma_points, curr_state, dt):
+def reconstruct_state_distribution(Xi, mu_kgk, dt):
     
     n = 6
-    weights = np.full((2 * n), 1/(2 * n))
+    weight = 1 / (2 * n)
 
+    mu_kp1gk_omega = np.zeros((3, 1))
+    sigma_kp1gk_omega = np.zeros((3, 3))
 
-    mean_omega = np.zeros((3, 1))
-    cov_omega = np.zeros((3, 3))
     ## Calculate omega's distribution via weighted mean
     for i in range(2 * n):
-        w = weights[i]
-        x = sigma_points[i]
+        # w = weights[i]
+        # x = sigma_points[i]
+        # 
+        # mean_omega += w * f(x, dt)[4:]
+        #
+        # ## TODO: maybe use np.cov cuz maybe quicker
+        # cov_omega += w * (f(x, dt)[4:] - mean_omega) @ (f(x, dt)[4:] - mean_omega).T
+        mu_kp1gk_omega += weight * Xi[i, -3:] 
+        # mean_omega += w  * x[4:]
 
-        mean_omega += w * f(x, dt)[4:]
 
+    for i in range(2 * n):
+        # w = weights[i]
+        # x = sigma_points[i]
         ## TODO: maybe use np.cov cuz maybe quicker
-        cov_omega += w * (f(x, dt)[4:] - mean_omega) @ (f(x, dt)[4:] - mean_omega).T
+        # cov_omega += w * (x[4:] - mean_omega) @ (x[4:] - mean_omega).T
+        sigma_kp1gk_omega += weight * (Xi[i, -3:] - mu_kp1gk_omega) \
+                                    @ (Xi[i, -3:] - mu_kp1gk_omega).T
+
+
 
 
     ## Calculate quaternion
-    sigma_quats = sigma_points[:, :4]
-    prev_quat = curr_state[:4]
-    # time_start_get_distribution_from_quaternions = TIME.perf_counter()
-    mean_quat, cov_quat = get_distribution_from_quaternions(sigma_quats, prev_quat)
-
-    # mean_quat = quaternion_weighted_mean(sigma_quats)
+    Xi_quats = Xi[:, :4]
     
-    # time_end_get_distribution_from_quaternions = TIME.perf_counter()
-    # print("\n time to get distribution from quaternions: ", time_end_get_distribution_from_quaternions - time_start_get_distribution_from_quaternions)
 
-    # print("HIIIIIIIIIII")
+    mu_kp1gk_quat, sigma_kp1gk_quat = quat_average(Xi_quats, quat_initial_guess=mu_kgk[:4])
 
-    # print("mean_quat.q", mean_quat.q)
-    # print("mean_omega", mean_omega)
-    mean = np.vstack((mean_quat.q.reshape(4, 1),
-                      mean_omega))
+    mu_kp1gk = np.vstack((mu_kp1gk_quat.reshape(4, 1),
+                      mu_kp1gk_omega))
 
-    covariance = np.block([[cov_quat, np.zeros_like(cov_quat)],
-                           [np.zeros_like(cov_omega), cov_omega]])
+    sigma_kp1gk = np.block([[sigma_kp1gk_quat, np.zeros((3, 3))],
+                           [np.zeros((3, 3)), sigma_kp1gk_quat]])
 
-    return mean, covariance
+    return mu_kp1gk, sigma_kp1gk
 
 def initialize_variables():
 
@@ -496,6 +501,7 @@ def f(x_k, dt):
     q_delta = aa2quat(omega_k * dt)
 
     q_kp1 = q_k * q_delta
+    # q_kp1.normalize()
     # preventQuatJump(q_kp1)
     omega_kp1 = omega_k
 
@@ -538,17 +544,23 @@ def estimate_rot(data_num=1, time_steps=999999):
 
     ## For each time step, 
     for k in range(T-1):
+    # for k in range(540, 546):
     # for k in range(2):
         
         if k % 500 == 0:
             step_start_time = TIME.perf_counter()
             print("\n time step k = ", k)
         dt = max(time[k+1] - time[k], 0.0001)
+        # dt = time[k+1] - time[k]
+        # if time[k] > 5.43:
+        #     print("time is ", time[k])
+        #     print("k is ", k)
 
-        Xi = generate_sigma_points(mu_kgk, sigma_kgk + R * dt)
+        sigma_kgk += R * dt
+        Xi = generate_sigma_points(mu_kgk, sigma_kgk)
         Xi_kp1gk = process_model(Xi, dt)
       
-        mu_kp1gk, sigma_kp1gk = predict_state_distribution(Xi_kp1gk, mu_kgk, dt)
+        mu_kp1gk, sigma_kp1gk = reconstruct_state_distribution(Xi_kp1gk, mu_kgk, dt)
         
 
         Yi = measurement_model(Xi_kp1gk)
@@ -557,7 +569,7 @@ def estimate_rot(data_num=1, time_steps=999999):
         sigma_yy = np.zeros((6, 6))
         sigma_xy = np.zeros_like(sigma_yy)
         weight = 1 / (2 * n)
-        for i in range(len(Yi)):
+        for i in range((2 * n)):
 
             sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
            
@@ -574,6 +586,7 @@ def estimate_rot(data_num=1, time_steps=999999):
 
         innovation = Y_imu[k+1]/np.linalg.norm(Y_imu[k+1]) - yi_bar/np.linalg.norm(yi_bar)
         # innovation = Y_imu[k+1] - yi_bar
+        # innovation = (Y_imu[k+1] - yi_bar)/ np.linalg.norm(Y_imu[k+1] - yi_bar)
         K = sigma_xy @ np.linalg.inv(sigma_yy)
         Kinnovation = K @ innovation
         
@@ -588,24 +601,42 @@ def estimate_rot(data_num=1, time_steps=999999):
         sigma_kp1gkp1 = sigma_kp1gk - K @ sigma_yy @ K.T
 
 
+    #
+    #     ## Make sure quat sign doesn't flip
+    #     previous_max_element_idx = np.argmax(np.abs(ukf_orientations[k]))
+    #
+    #
+    #     prev_element = ukf_orientations[k, previous_max_element_idx]
+    #     new_element = q_kp1gkp1.q[previous_max_element_idx]
+    #     if np.sign(prev_element) != np.sign(new_element):
+    #
+    #         print("prev quat", ukf_orientations[k])
+    #         print("prevmax element idx", previous_max_element_idx)
+    #         print("next raw quat", q_kp1gkp1.q)
+    #         q_kp1gkp1 = vec2quat(-1 * q_kp1gkp1.q)
+    #        
+    #         print("fixed quat", q_kp1gkp1.q)
+    #     ukf_orientations[k+1] = q_kp1gkp1.q
+    # 
+    #     
+        
 
         ## Make sure quat sign doesn't flip
-        previous_max_element_idx = np.argmax(np.abs(ukf_orientations[k]))
+        prev_max_component_idx = np.argmax(np.abs(ukf_orientations[k]))
+        prev_max_component = ukf_orientations[k, prev_max_component_idx]
+        new_component = q_kp1gkp1.q[prev_max_component_idx]
+        max_sign_flipped = np.sign(prev_max_component) != np.sign(new_component)
+        if max_sign_flipped:
+            q_kp1gkp1 = vec2quat(-1 * np.copy(q_kp1gkp1.q))
+        else:
+            q_kp1gkp1 = vec2quat(np.copy(q_kp1gkp1.q))
 
 
-        prev_element = ukf_orientations[k, previous_max_element_idx]
-        new_element = q_kp1gkp1.q[previous_max_element_idx]
-        if np.sign(prev_element) != np.sign(new_element):
 
-            print("prev quat", ukf_orientations[k])
-            print("prevmax element idx", previous_max_element_idx)
-            print("next raw quat", q_kp1gkp1.q)
-            q_kp1gkp1 = vec2quat(-1 * q_kp1gkp1.q)
-           
-            print("fixed quat", q_kp1gkp1.q)
+        # Ensure w component stays positive
+        q_kp1gkp1 = vec2quat(np.sign(q_kp1gkp1.scalar()) * q_kp1gkp1.q)
+        # q_kp1gkp1.normalize()
         ukf_orientations[k+1] = q_kp1gkp1.q
-    
-        
 
 
 
