@@ -556,13 +556,13 @@ def estimate_rot(data_num=1, time_steps=999999):
             sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
           
 
-            # r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
-            # r_W.normalize()
-            # Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
-            #                Xi[i, -3:] - mu_kp1gk[-3:]))
+            r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
+            r_W.normalize()
+            Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
+                           Xi[i, -3:] - mu_kp1gk[-3:]))
 
-            Wi = np.vstack((Errors[i].reshape(-1, 1),
-                             Xi[i, -3:] - mu_kp1gk[-3:]))
+            # Wi = np.vstack((Errors[i].reshape(-1, 1),
+            #                  Xi[i, -3:] - mu_kp1gk[-3:]))
             sigma_xy += weight * Wi @ (Yi[i] - yi_bar).T
 
 
