@@ -259,10 +259,10 @@ def get_calibrated_imu_data(data_num):
   
     
 
-    accel_alpha = np.full(3, 350.0)
+    accel_alpha = np.full(3, 35.0)
     accel_beta = np.array([-510.0, -500.0, 500.0])
 
-    gyro_alpha = np.full(3, 3.32)
+    gyro_alpha = np.full(3, 200)
     gyro_beta = np.array([347, 347, 347])
 
     accel = (accel - accel_beta) * (3300 / (1023 * accel_alpha))
@@ -338,9 +338,7 @@ def generate_sigma_points(mu, cov):
         # preventQuatJump(xi_q)
         # xi_q.normalize()
         xi_q = xi_q.q.reshape(4, 1)
-
         xi_w = mu[-3:].reshape(3, 1) + variation[-3:].reshape(3, 1)
-
 
         Xi[i] = np.vstack((xi_q.reshape(-1, 1),
                             xi_w.reshape(-1, 1)))
@@ -365,9 +363,11 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
             # preventQuatJump(ei_quat)
             ei = ei_quat.axis_angle()
 
-
-            range_bounding = (np.mod(np.linalg.norm(ei) + np.pi, 2 * np.pi) - np.pi) / np.linalg.norm(ei)
-            Errors[i, :] = ei * range_bounding
+            if np.linalg.norm(ei) == 0:
+                Errors[i, :] = np.zeros(3)
+            else:
+                range_bounding = (np.mod(np.linalg.norm(ei) + np.pi, 2 * np.pi) - np.pi) / np.linalg.norm(ei)
+                Errors[i, :] = ei * range_bounding
 
         ei_mean = np.mean(Errors, axis=0)
         ei_mean_quat = aa2quat(ei_mean, normalize=True)
@@ -384,13 +384,13 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
             # print("\nGD completed after ", iter, " iterations.")
             for e in Errors:
                 covariance += w * e @ e.T
-            return mean, covariance
+            return mean, covariance, Errors
     w = 1 / (2 * n)
-    covariance = np.zeros((3, 3))
+    covariance = np.eye(3) * 0.001
     # print("GD FAILED\n\n\n")
     for e in Errors:
         covariance += w * e @ e.T
-    return mean, covariance
+    return mean, covariance, Errors
 
 
 def reconstruct_state_distribution(Xi, mu_kgk, dt):
@@ -403,36 +403,18 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
 
     ## Calculate omega's distribution via weighted mean
     for i in range(2 * n):
-        # w = weights[i]
-        # x = sigma_points[i]
-        # 
-        # mean_omega += w * f(x, dt)[4:]
-        #
-        # ## TODO: maybe use np.cov cuz maybe quicker
-        # cov_omega += w * (f(x, dt)[4:] - mean_omega) @ (f(x, dt)[4:] - mean_omega).T
         mu_kp1gk_omega += weight * Xi[i, -3:]
-        # mu_kp1gk_omega += weight * f(Xi[i], dt)[4:]
-
 
     for i in range(2 * n):
-        # w = weights[i]
-        # x = sigma_points[i]
-        ## TODO: maybe use np.cov cuz maybe quicker
-        # cov_omega += w * (x[4:] - mean_omega) @ (x[4:] - mean_omega).T
         sigma_kp1gk_omega += weight * (Xi[i, -3:] - mu_kp1gk_omega) \
                                     @ (Xi[i, -3:] - mu_kp1gk_omega).T
-        #
-        # sigma_kp1gk_omega += weight * (f(Xi[i], dt)[4:] - mu_kp1gk_omega) \
-        #                                 @ (f(Xi[i], dt)[4:] - mu_kp1gk_omega).T
-
-
 
 
     ## Calculate quaternion
     Xi_quats = Xi[:, :4]
     
 
-    mu_kp1gk_quat, sigma_kp1gk_quat = quat_average(Xi_quats, quat_initial_guess=mu_kgk[:4])
+    mu_kp1gk_quat, sigma_kp1gk_quat, Errors = quat_average(Xi_quats, quat_initial_guess=mu_kgk[:4])
 
     mu_kp1gk = np.vstack((mu_kp1gk_quat.q.reshape(4, 1),
                       mu_kp1gk_omega))
@@ -440,7 +422,7 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
     sigma_kp1gk = np.block([[sigma_kp1gk_quat, np.zeros((3, 3))],
                            [np.zeros((3, 3)), sigma_kp1gk_omega]])
 
-    return mu_kp1gk, sigma_kp1gk
+    return mu_kp1gk, sigma_kp1gk, Errors
 
 def initialize_variables():
 
@@ -449,12 +431,12 @@ def initialize_variables():
     quat.from_axis_angle(np.array([0, 0, 0]))
     mean = np.hstack((quat.q, [0, 0, 0]))
 
-    print("mean", mean)
+    # print("mean", mean)
 
-    covariance = np.eye(6) * 0.1
+    covariance = np.eye(6) * 1.001
 
-    R = np.eye(6) * 5.0
-    Q = np.eye(6) * 5.0
+    R = np.eye(6) * 2.1
+    Q = np.eye(6) * 2.1
 
     n = 6
     
@@ -469,18 +451,18 @@ def g(state):
 
     q_k = Quaternion(scalar=state[0, 0], 
                      vec=state[1:4, 0])
-
+    q_k.normalize()
     # TODO: maybe change sign of 9.81
     g = Quaternion(scalar=0, 
-                   vec=[0, 0, -9.81])
+                   vec=[0, 0, 9.81])
+    q_k_inv = q_k.inv()
+    q_k_inv.normalize()
 
-    g_prime = q_k.inv() * g * q_k
-    g_prime.normalize()
-    # preventQuatJump(g_prime)
+    g_prime = q_k_inv * g * q_k
+
 
     y_rot = state[4:]
     y_acc = g_prime.vec().reshape(-1, 1)
-
 
     y_kp1gk = np.vstack((y_acc,
                          y_rot))  
@@ -504,7 +486,7 @@ def f(x_k, dt):
     q_delta = aa2quat(omega_k * dt)
 
     q_kp1 = q_k * q_delta
-    # q_kp1.normalize()
+    q_kp1.normalize()
     # preventQuatJump(q_kp1)
     omega_kp1 = omega_k
 
@@ -547,23 +529,19 @@ def estimate_rot(data_num=1, time_steps=999999):
 
     ## For each time step, 
     for k in range(T-1):
-    # for k in range(540, 546):
-    # for k in range(2):
+
         
         if k % 500 == 0:
             step_start_time = TIME.perf_counter()
             print("\n time step k = ", k)
         dt = max(time[k+1] - time[k], 0.0001)
-        # dt = time[k+1] - time[k]
-        # if time[k] > 5.43:
-        #     print("time is ", time[k])
-        #     print("k is ", k)
+
 
         sigma_kgk += R * dt
         Xi = generate_sigma_points(mu_kgk, sigma_kgk)
         Xi_kp1gk = process_model(Xi, dt)
       
-        mu_kp1gk, sigma_kp1gk = reconstruct_state_distribution(Xi_kp1gk, mu_kgk, dt)
+        mu_kp1gk, sigma_kp1gk, Errors = reconstruct_state_distribution(Xi_kp1gk, mu_kgk, dt)
         
 
         Yi = measurement_model(Xi_kp1gk)
@@ -571,27 +549,46 @@ def estimate_rot(data_num=1, time_steps=999999):
 
         sigma_yy = np.zeros((6, 6))
         sigma_xy = np.zeros_like(sigma_yy)
+
         weight = 1 / (2 * n)
         for i in range((2 * n)):
-
+    
             sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
-           
-            r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
-            r_W.normalize()
-            # preventQuatJump(r_W)
-            Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
-                           Xi[i, -3:] - mu_kp1gk[-3:]))
+          
 
-            sigma_xy += weight * (Wi) @ (Yi[i] - yi_bar).T
+            # r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
+            # r_W.normalize()
+            # Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
+            #                Xi[i, -3:] - mu_kp1gk[-3:]))
 
+            Wi = np.vstack((Errors[i].reshape(-1, 1),
+                             Xi[i, -3:] - mu_kp1gk[-3:]))
+            sigma_xy += weight * Wi @ (Yi[i] - yi_bar).T
+
+
+ 
+        ## Check if error is smal
 
         sigma_yy += Q
 
-        innovation = Y_imu[k+1]/np.linalg.norm(Y_imu[k+1]) - yi_bar/np.linalg.norm(yi_bar)
-        # innovation = Y_imu[k+1] - yi_bar
+        # innovation = Y_imu[k+1]/np.linalg.norm(Y_imu[k+1]) - yi_bar/np.linalg.norm(yi_bar)
+        innovation = Y_imu[k+1] - yi_bar
         # innovation = (Y_imu[k+1] - yi_bar)/ np.linalg.norm(Y_imu[k+1] - yi_bar)
+
+        # print("\n innovation \n", innovation)
+        # print("\nY_imu[k+1]\n", Y_imu[k+1])
+        # print("\nyi_bar\n", yi_bar)
         K = sigma_xy @ np.linalg.inv(sigma_yy)
         Kinnovation = K @ innovation
+        #
+        # print("\n\n sigma_xy\n", sigma_xy)
+        # print("\n sigma_xy  det\n", np.linalg.det(sigma_xy))
+        # print("\n evals\n", np.linalg.eigvals(sigma_xy))
+        # #
+        #
+        # # print("\n\n sigma_yy\n", sigma_yy)
+        # print("\n sigma_yy  det\n", np.linalg.det(sigma_yy))
+        # print("\n evals\n", np.linalg.eigvals(sigma_yy))
         
 
         # q_kp1gkp1 = vec2quat(mu_kp1gk[:4]) * aa2quat(Kinnovation[:3])
@@ -601,7 +598,26 @@ def estimate_rot(data_num=1, time_steps=999999):
         # preventQuatJump(q_kp1gkp1)
         mu_kp1gkp1 = np.vstack((q_kp1gkp1.q.reshape(4, 1),
                                 mu_kp1gk[-3:] + Kinnovation[-3:]))
+        
+        # print("\n\n sigma_kgk\n", sigma_kgk)
+        # 
+        # print("\n sigma_kgk  det\n", np.linalg.det(sigma_kgk ))
+        # print("\n evals\n", np.linalg.eigvals(sigma_kgk ))
+        # print("\n K  det\n", np.linalg.det(K ))
+        # print("\n evals\n", np.linalg.eigvals(K ))
+        # print("\n\n K @ sigma_yy @ K.T det\n", np.linalg.det(K @ sigma_yy @ K.T))
+        # print("\n evals\n", np.linalg.eigvals(K @ sigma_yy @ K.T))
+
+
+
         sigma_kp1gkp1 = sigma_kp1gk - K @ sigma_yy @ K.T
+        # print("\n\n sigma_kp1gk det\n", np.linalg.det(sigma_kp1gk))
+        # print("\n evals\n", np.linalg.eigvals(sigma_kp1gk))
+        #
+        #
+        # print("\n\n sigma_kp1gkp1 det\n", np.linalg.det(sigma_kp1gkp1))
+        # print("\n evals\n", np.linalg.eigvals(sigma_kp1gkp1))
+
 
 
     #
@@ -648,8 +664,8 @@ def estimate_rot(data_num=1, time_steps=999999):
 
 
         # For next loop:
-        mu_kgk = mu_kp1gkp1
-        sigma_kgk = sigma_kp1gkp1
+        mu_kgk = np.copy(mu_kp1gkp1)
+        sigma_kgk = np.copy(sigma_kp1gkp1)
 
 
     ukf_orientations_rpy = roll, pitch, yaw
@@ -722,11 +738,16 @@ def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
     T = min(ukf_orientations_rpy[0].shape[0], vicon_orientations_rpy.shape[0], time_steps)
 
     imu_rpy = np.zeros((T, 3))
+    imu_quaternion = np.zeros((T, 4))
     for i in range(T-1):
         r, p = calculate_roll_pitch(imu_observations[i, :3])
-        imu_rpy[i, 0] = r
-        imu_rpy[i, 1] = p
+        # print("r.shape", r.shape)
+        # print("type(r)", type(r))
+        imu_rpy[i, 0] = r[0]
+        imu_rpy[i, 1] = p[0]
         imu_rpy[i, 2] = 0
+
+        imu_quaternion[i, :] = aa2quat(imu_rpy[i, :]).q
  
 
     plt.figure(1)
@@ -763,29 +784,42 @@ def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
 
     print("ukf_orientations.shape", ukf_orientations.shape)
     plt.figure(2)
-    plt.subplot(2, 1, 1)
+    plt.subplot(3, 1, 1)
     plt.plot(time[:T], ukf_orientations[:T, 0],
-             label="w")
+             label="w", alpha=0.4)
     plt.plot(time[:T], ukf_orientations[:T, 1],
-             label="x")
+             label="x", alpha=0.4)
     plt.plot(time[:T], ukf_orientations[:T, 2],
-             label="y")
+             label="y", alpha=0.4)
     plt.plot(time[:T], ukf_orientations[:T, 3],
-             label="z")
+             label="z", alpha=0.4)
     plt.legend()
     plt.title("UKF Orientation quaternion")
 
+    print("imu_quaternion.shape", imu_quaternion.shape)
+    plt.subplot(3, 1, 2)
+    plt.plot(time[:T], imu_quaternion[:T, 0],
+             label="w", alpha=0.4)
+    plt.plot(time[:T], imu_quaternion[:T, 1],
+             label="x", alpha=0.4)
+    plt.plot(time[:T], imu_quaternion[:T, 2],
+             label="y", alpha=0.4)
+    plt.plot(time[:T], imu_quaternion[:T, 3],
+             label="z", alpha=0.4)
+    plt.legend()
+    plt.title("IMU Orientation quaternion")
+
 
     print("vicon_orientations.shape", vicon_orientations.shape)
-    plt.subplot(2, 1, 2)
+    plt.subplot(3, 1, 3)
     plt.plot(time[:T], vicon_orientations[:T, 0],
-             label="w")
+             label="w", alpha=0.4)
     plt.plot(time[:T], vicon_orientations[:T, 1],
-             label="x")
+             label="x", alpha=0.4)
     plt.plot(time[:T], vicon_orientations[:T, 2],
-             label="y")
+             label="y", alpha=0.4)
     plt.plot(time[:T], vicon_orientations[:T, 3],
-             label="z")
+             label="z", alpha=0.4)
     plt.legend()
     plt.title("Vicon Orientation quaternion")
 
