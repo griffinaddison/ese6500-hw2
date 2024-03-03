@@ -384,7 +384,7 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
             # print("\nGD completed after ", iter, " iterations.")
             for e in Errors:
                 covariance += w * e @ e.T
-            return mean.q, covariance
+            return mean, covariance
     w = 1 / (2 * n)
     covariance = np.zeros((3, 3))
     # print("GD FAILED\n\n\n")
@@ -410,8 +410,8 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
         #
         # ## TODO: maybe use np.cov cuz maybe quicker
         # cov_omega += w * (f(x, dt)[4:] - mean_omega) @ (f(x, dt)[4:] - mean_omega).T
-        mu_kp1gk_omega += weight * Xi[i, -3:] 
-        # mean_omega += w  * x[4:]
+        mu_kp1gk_omega += weight * Xi[i, -3:]
+        # mu_kp1gk_omega += weight * f(Xi[i], dt)[4:]
 
 
     for i in range(2 * n):
@@ -421,6 +421,9 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
         # cov_omega += w * (x[4:] - mean_omega) @ (x[4:] - mean_omega).T
         sigma_kp1gk_omega += weight * (Xi[i, -3:] - mu_kp1gk_omega) \
                                     @ (Xi[i, -3:] - mu_kp1gk_omega).T
+        #
+        # sigma_kp1gk_omega += weight * (f(Xi[i], dt)[4:] - mu_kp1gk_omega) \
+        #                                 @ (f(Xi[i], dt)[4:] - mu_kp1gk_omega).T
 
 
 
@@ -431,11 +434,11 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
 
     mu_kp1gk_quat, sigma_kp1gk_quat = quat_average(Xi_quats, quat_initial_guess=mu_kgk[:4])
 
-    mu_kp1gk = np.vstack((mu_kp1gk_quat.reshape(4, 1),
+    mu_kp1gk = np.vstack((mu_kp1gk_quat.q.reshape(4, 1),
                       mu_kp1gk_omega))
 
     sigma_kp1gk = np.block([[sigma_kp1gk_quat, np.zeros((3, 3))],
-                           [np.zeros((3, 3)), sigma_kp1gk_quat]])
+                           [np.zeros((3, 3)), sigma_kp1gk_omega]])
 
     return mu_kp1gk, sigma_kp1gk
 
