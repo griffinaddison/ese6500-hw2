@@ -262,7 +262,7 @@ def get_calibrated_imu_data(data_num):
     accel_alpha = np.full(3, 35.0)
     accel_beta = np.array([-510.0, -500.0, 500.0])
 
-    gyro_alpha = np.full(3, 3.33)
+    gyro_alpha = np.full(3, 200)
     gyro_beta = np.array([347, 347, 347])
 
     accel = (accel - accel_beta) * (3300 / (1023 * accel_alpha))
@@ -277,7 +277,6 @@ def get_calibrated_imu_data(data_num):
                                   gyro.reshape(-1, 3, 1)))
 
 
-    print("gyro[50]:\n ", gyro[50])
     return accel, gyro, time, imu_observations
 
 
@@ -458,18 +457,15 @@ def g(state):
     q_k = Quaternion(scalar=state[0, 0], 
                      vec=state[1:4, 0])
     q_k.normalize()
-    # TODO: maybe change sign of 9.81
     g = Quaternion(scalar=0, 
                    vec=[0, 0, 9.81])
-    q_k_inv = q_k.inv()
-    q_k_inv.normalize()
 
-    g_prime = q_k_inv * g * q_k
+    g_prime = q_k.inv() * g * q_k
 
-
-    y_rot = state[4:]
     y_acc = g_prime.vec().reshape(-1, 1)
 
+    y_rot = state[4:]
+    
     y_kp1gk = np.vstack((y_acc,
                          y_rot))  
 
@@ -584,31 +580,12 @@ def estimate_rot(data_num=1, time_steps=999999):
 
 
  
-        ## Check if error is smal
 
         sigma_yy += Q
 
-        # innovation = Y_imu[k+1]/np.linalg.norm(Y_imu[k+1]) - yi_bar/np.linalg.norm(yi_bar)
         innovation = Y_imu[k+1] - yi_bar
-        # innovation = (Y_imu[k+1] - yi_bar)/ np.linalg.norm(Y_imu[k+1] - yi_bar)
-
-        # print("\n innovation \n", innovation)
-        # print("\nY_imu[k+1]\n", Y_imu[k+1])
-        # print("\nyi_bar\n", yi_bar)
         K = sigma_xy @ np.linalg.inv(sigma_yy)
         Kinnovation = K @ innovation
-        #
-        # print("\n\n sigma_xy\n", sigma_xy)
-        # print("\n sigma_xy  det\n", np.linalg.det(sigma_xy))
-        # print("\n evals\n", np.linalg.eigvals(sigma_xy))
-        # #
-        #
-        # # print("\n\n sigma_yy\n", sigma_yy)
-        # print("\n sigma_yy  det\n", np.linalg.det(sigma_yy))
-        # print("\n evals\n", np.linalg.eigvals(sigma_yy))
-        
-
-        # q_kp1gkp1 = vec2quat(mu_kp1gk[:4]) * aa2quat(Kinnovation[:3])
 
         q_kp1gkp1 = aa2quat(Kinnovation[:3]) * vec2quat(mu_kp1gk[:4]) 
         q_kp1gkp1.normalize()
@@ -616,46 +593,10 @@ def estimate_rot(data_num=1, time_steps=999999):
         mu_kp1gkp1 = np.vstack((q_kp1gkp1.q.reshape(4, 1),
                                 mu_kp1gk[-3:] + Kinnovation[-3:]))
         
-        # print("\n\n sigma_kgk\n", sigma_kgk)
-        # 
-        # print("\n sigma_kgk  det\n", np.linalg.det(sigma_kgk ))
-        # print("\n evals\n", np.linalg.eigvals(sigma_kgk ))
-        # print("\n K  det\n", np.linalg.det(K ))
-        # print("\n evals\n", np.linalg.eigvals(K ))
-        # print("\n\n K @ sigma_yy @ K.T det\n", np.linalg.det(K @ sigma_yy @ K.T))
-        # print("\n evals\n", np.linalg.eigvals(K @ sigma_yy @ K.T))
-
-
 
         sigma_kp1gkp1 = sigma_kp1gk - K @ sigma_yy @ K.T
-        # print("\n\n sigma_kp1gk det\n", np.linalg.det(sigma_kp1gk))
-        # print("\n evals\n", np.linalg.eigvals(sigma_kp1gk))
-        #
-        #
-        # print("\n\n sigma_kp1gkp1 det\n", np.linalg.det(sigma_kp1gkp1))
-        # print("\n evals\n", np.linalg.eigvals(sigma_kp1gkp1))
 
 
-
-    #
-    #     ## Make sure quat sign doesn't flip
-    #     previous_max_element_idx = np.argmax(np.abs(ukf_orientations[k]))
-    #
-    #
-    #     prev_element = ukf_orientations[k, previous_max_element_idx]
-    #     new_element = q_kp1gkp1.q[previous_max_element_idx]
-    #     if np.sign(prev_element) != np.sign(new_element):
-    #
-    #         print("prev quat", ukf_orientations[k])
-    #         print("prevmax element idx", previous_max_element_idx)
-    #         print("next raw quat", q_kp1gkp1.q)
-    #         q_kp1gkp1 = vec2quat(-1 * q_kp1gkp1.q)
-    #        
-    #         print("fixed quat", q_kp1gkp1.q)
-    #     ukf_orientations[k+1] = q_kp1gkp1.q
-    # 
-    #     
-        
 
         ## Make sure quat sign doesn't flip
         prev_max_component_idx = np.argmax(np.abs(ukf_orientations[k]))
@@ -668,17 +609,13 @@ def estimate_rot(data_num=1, time_steps=999999):
             q_kp1gkp1 = vec2quat(np.copy(q_kp1gkp1.q))
 
 
-
         # Ensure w component stays positive
         q_kp1gkp1 = vec2quat(np.sign(q_kp1gkp1.scalar()) * q_kp1gkp1.q)
         # q_kp1gkp1.normalize()
         ukf_orientations[k+1] = q_kp1gkp1.q
 
 
-
-
         roll[k+1], pitch[k+1], yaw[k+1] = q_kp1gkp1.euler_angles() 
-
 
         # For next loop:
         mu_kgk = np.copy(mu_kp1gkp1)
@@ -739,7 +676,6 @@ def get_vicon_data(data_num=1):
 
 
     return vicon_orientations_rpy, vicon_orientations, time
-
 
 
 
@@ -848,7 +784,6 @@ def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
 
         
 estimate_rot(1)
-# plot(1)
 
 
 
