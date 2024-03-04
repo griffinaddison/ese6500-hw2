@@ -262,7 +262,7 @@ def get_calibrated_imu_data(data_num):
     accel_alpha = np.full(3, 35.0)
     accel_beta = np.array([-510.0, -500.0, 500.0])
 
-    gyro_alpha = np.full(3, 200)
+    gyro_alpha = np.full(3, 3.33)
     gyro_beta = np.array([347, 347, 347])
 
     accel = (accel - accel_beta) * (3300 / (1023 * accel_alpha))
@@ -276,7 +276,8 @@ def get_calibrated_imu_data(data_num):
     imu_observations = np.hstack((accel.reshape(-1, 3, 1),
                                   gyro.reshape(-1, 3, 1)))
 
- 
+
+    print("gyro[50]:\n ", gyro[50])
     return accel, gyro, time, imu_observations
 
 
@@ -317,7 +318,7 @@ def generate_sigma_points(mu, cov):
     n = 6
     Xi = np.zeros((2 * n, 7, 1))
 
-    sqrt_cov = scipy.linalg.sqrtm(cov)
+    sqrt_cov = scipy.linalg.sqrtm(cov).real
 
     # For each sigma point
     for i in range(2 * n):
@@ -334,7 +335,10 @@ def generate_sigma_points(mu, cov):
         variation = (sign * np.sqrt(n) * sqrt_cov_col).reshape(6, 1)
         
 
-        xi_q = (vec2quat(mu[:4]) * aa2quat(variation[:3]))
+        # xi_q = (vec2quat(mu[:4]) * aa2quat(variation[:3]))
+
+        variation_q = Quaternion(scalar=1, vec=variation[:3].squeeze())
+        xi_q = (vec2quat(mu[:4]) * variation_q)
         # preventQuatJump(xi_q)
         # xi_q.normalize()
         xi_q = xi_q.q.reshape(4, 1)
@@ -364,7 +368,7 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
             ei = ei_quat.axis_angle()
 
             if np.linalg.norm(ei) == 0:
-                Errors[i, :] = np.zeros(3)
+                Errors[i:] = np.zeros(3)
             else:
                 range_bounding = (np.mod(np.linalg.norm(ei) + np.pi, 2 * np.pi) - np.pi) / np.linalg.norm(ei)
                 Errors[i, :] = ei * range_bounding
@@ -375,22 +379,24 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
         mean.normalize()
         # preventQuatJump(mean)
         ## Check if error is small enough to terminate
-        threshold = 1e-10
+        threshold = 1e-5
 
         
         if (np.linalg.norm(ei_mean) < threshold):
-            covariance = np.eye(3) * 0.001
+            covariance = np.eye(3) * 0.00
             w = 1 / (2 * n)
             # print("\nGD completed after ", iter, " iterations.")
             for e in Errors:
                 covariance += w * e @ e.T
             return mean, covariance, Errors
-    w = 1 / (2 * n)
-    covariance = np.eye(3) * 0.001
-    # print("GD FAILED\n\n\n")
-    for e in Errors:
-        covariance += w * e @ e.T
-    return mean, covariance, Errors
+
+        Errors = np.zeros((2 * n, 3))
+    # w = 1 / (2 * n)
+    # covariance = np.eye(3) * 0.00
+    # # print("GD FAILED\n\n\n")
+    # for e in Errors:
+    #     covariance += w * e @ e.T
+    # return mean, covariance, Errors
 
 
 def reconstruct_state_distribution(Xi, mu_kgk, dt):
@@ -433,7 +439,7 @@ def initialize_variables():
 
     # print("mean", mean)
 
-    covariance = np.eye(6) * 1.001
+    covariance = np.eye(6) * 0.001
 
     R = np.eye(6) * 2.1
     Q = np.eye(6) * 2.1
@@ -529,7 +535,7 @@ def estimate_rot(data_num=1, time_steps=999999):
 
     ## For each time step, 
     for k in range(T-1):
-
+    # for k in range(2):
         
         if k % 500 == 0:
             step_start_time = TIME.perf_counter()
@@ -552,18 +558,29 @@ def estimate_rot(data_num=1, time_steps=999999):
 
         weight = 1 / (2 * n)
         for i in range((2 * n)):
-    
-            sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
+   
+
+            sigma_yy += weight * np.outer(Yi[i] - yi_bar, Yi[i] - yi_bar)
+            # sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
           
 
-            r_W = vec2quat(Xi[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
-            r_W.normalize()
-            Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
-                           Xi[i, -3:] - mu_kp1gk[-3:]))
+            # r_W = vec2quat(Xi_kp1gk[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
+            # r_W.normalize()
+            # Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
+            #                Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
+            #
+
+            r_W = vec2quat(Xi_kp1gk[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
+            # r_W.normalize()
+            Wi = np.vstack((r_W.vec().reshape(3, 1),
+                            Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
+
 
             # Wi = np.vstack((Errors[i].reshape(-1, 1),
-            #                  Xi[i, -3:] - mu_kp1gk[-3:]))
-            sigma_xy += weight * Wi @ (Yi[i] - yi_bar).T
+            #                  Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
+            # sigma_xy += weight * Wi @ (Yi[i] - yi_bar).T
+            #
+            sigma_xy += weight * np.outer(Wi, Yi[i] - yi_bar)
 
 
  
