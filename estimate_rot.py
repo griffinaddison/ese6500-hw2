@@ -74,46 +74,166 @@ def unskew(m):
 # #
 #
 #
-def calibrate_accelerometer(accel, rots, vicon, time):
-    
-    T = time.shape[0] + 1
+# def calibrate_accelerometer2(accel, rots, vicon, time):
+#     
+#     T = time.shape[0] + 1
+#
+#     # Transpose to fit my math better:w
+#     ARaw_B = accel.T
+#     # Append constant term to introduce bias in the math
+#     ones_column = np.ones((ARaw_B.shape[0], 1))
+#     ARaw_B = np.hstack((ARaw_B, ones_column))
+#
+#     ## Assemble the vector of rotation matrices
+#
+#     # Transpose each 3x3 (by swapping the first 2 dims)
+#     R_WB_transpose = np.transpose(rots, axes=(1, 0, 2))
+#     # Pad each 3x3 rot matrix into a 4x4
+#     # Specifically, add to the start and end of each dimension (0,1), (0,1), (0,1) many constant_values
+#     R_WB_transpose = np.pad(R_WB_transpose, ((0, 1), (0, 1), (0, 0)), mode='constant', constant_values=0)
+#     # Set bottom right term of each homogenized rotation matrix to 1
+#     R_WB_transpose[3, 3, :] = 1 
+#     # But actually numpy's batch dimension should be the first for both things
+#     R_WB_transpose = np.transpose(R_WB_transpose, axes=(2, 0, 1))
+#
+#
+#
+#
+#
+#     # Assemble the vector of ground truth a_W (just gravity) A_W
+#     A_W = np.zeros((T-1, 4, 1))
+#     A_W[:, 2, 0] = 9.81
+#     A_W[:, 3, 0] = 1
+#
+#
+#     
+#     ## Solve the linear regression problem
+#     
+#     # Create Y and X based upon our problem's variables
+#     Y = np.matmul(R_WB_transpose, A_W)
+#     Y = np.squeeze(Y)
+#     X = np.squeeze(ARaw_B)
+#
+#     # print("Y.shape", Y.shape)
+#     # print("X.shape", X.shape)
+#     # print("(X.T @ X).shape", (X.T @ X).shape)
+#
+#     # Compute K calibration gains using linear regression closed form
+#     K_accel = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
+#
+#
+#     # print("K_accel", K_accel)
+#     ## Now solve for accel alpha and beta
+#     
+#     accel_alpha = np.zeros(3)
+#     accel_beta = np.zeros(3)
+#
+#     for row in range(K_accel.shape[0]-1):
+#         k_i = K_accel[row][row]
+#         b_i = K_accel[row][-1]
+#
+#         accel_alpha[row] = 3300 / (1023 * k_i)
+#         accel_beta[row] = - b_i / k_i
+#
+#     return accel_alpha, accel_beta
+
+def get_accelerometer_calibration(data_num=1):
+   
+
+
+    #load data
+    imu = io.loadmat('imu/imuRaw'+str(data_num)+'.mat')
+    time = imu['ts'].astype(float)
+    time = np.squeeze(time)
+    time = time - time[0]
+    # T = time.shape[0]
+
+    vicon_rotation_matrices, _, _, _, time_vicon = get_vicon_data(data_num)
+    # print("T", T)
+    # print("\n time_vicon.shape[0]\n", time_vicon.shape[0])
+    # T = min(T, vicon_rotation_matrices.shape[0])
+    # print("updated T", T)
+    accel = imu['vals'][0:3,:].astype(float)
+    accel[0] = -accel[0]
+    accel[1] = -accel[1]
+    accel = accel.T
+
+    gyro = imu['vals'][3:6,:].astype(float)
+    gyro = gyro.T
+    gyro = gyro[:, [1, 2, 0]]
+
+
+    T = min(accel.shape[0], gyro.shape[0], vicon_rotation_matrices.shape[0], time.shape[0])
+
+    gyro = gyro[:T]
+
+    time = time[:T]
+    accel = accel[:T]
+    vicon_rotation_matrices = vicon_rotation_matrices[:T]
+
+    print("gyro.shape", gyro.shape)
+    print("accel.shape", accel.shape)
+
+
+
+    # T = time.shape[0] + 1
 
     # Transpose to fit my math better:w
-    ARaw_B = accel.T
+    # ARaw_B = accel.T
     # Append constant term to introduce bias in the math
-    ones_column = np.ones((ARaw_B.shape[0], 1))
-    ARaw_B = np.hstack((ARaw_B, ones_column))
+    # ones_column = np.ones((ARaw_B.shape[0], 1))
+    # ARaw_B = np.hstack((ARaw_B, ones_column))
+
+    ARaw_B = accel
+
+    ARaw_B = np.pad(ARaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
+
+    ARaw_B = ARaw_B.reshape((-1, 1, 4))
+
+    # print("\n ARaw_B\n", ARaw_B)
+    # print("\n ARaw_B.shape\n", ARaw_B.shape)
 
     ## Assemble the vector of rotation matrices
 
-    # Transpose each 3x3 (by swapping the first 2 dims)
-    R_WB_transpose = np.transpose(rots, axes=(1, 0, 2))
-    # Pad each 3x3 rot matrix into a 4x4
-    # Specifically, add to the start and end of each dimension (0,1), (0,1), (0,1) many constant_values
-    R_WB_transpose = np.pad(R_WB_transpose, ((0, 1), (0, 1), (0, 0)), mode='constant', constant_values=0)
-    # Set bottom right term of each homogenized rotation matrix to 1
-    R_WB_transpose[3, 3, :] = 1 
-    # But actually numpy's batch dimension should be the first for both things
-    R_WB_transpose = np.transpose(R_WB_transpose, axes=(2, 0, 1))
+    # # Transpose each 3x3 (by swapping the first 2 dims)
+    # R_WB_transpose = np.transpose(rots, axes=(1, 0, 2))
+    # # Pad each 3x3 rot matrix into a 4x4
+    # # Specifically, add to the start and end of each dimension (0,1), (0,1), (0,1) many constant_values
+    # R_WB_transpose = np.pad(R_WB_transpose, ((0, 1), (0, 1), (0, 0)), mode='constant', constant_values=0)
+    # # Set bottom right term of each homogenized rotation matrix to 1
+    # R_WB_transpose[3, 3, :] = 1 
+    # # But actually numpy's batch dimension should be the first for both things
+    # R_WB_transpose = np.transpose(R_WB_transpose, axes=(2, 0, 1))
+    #
 
+    R_WB = np.copy(vicon_rotation_matrices)
+
+    R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
+    R_WB[:, 3, 3] = 1
+
+    R_WB_transpose = np.transpose(R_WB, axes=(0, 2, 1))
+
+
+    # print("\n R_WB_transpose\n", R_WB_transpose)
+    # print("\n R_WB_transpose.shape\n", R_WB_transpose.shape)
 
 
 
 
     # Assemble the vector of ground truth a_W (just gravity) A_W
-    A_W = np.zeros((T-1, 4, 1))
+    A_W = np.zeros((T, 4, 1))
     A_W[:, 2, 0] = 9.81
     A_W[:, 3, 0] = 1
 
-
-    
+    # print("TTTTT = ", T)
+    # print("A_W.shape", A_W.shape) 
     ## Solve the linear regression problem
     
     # Create Y and X based upon our problem's variables
     Y = np.matmul(R_WB_transpose, A_W)
     Y = np.squeeze(Y)
     X = np.squeeze(ARaw_B)
-
+    #
     # print("Y.shape", Y.shape)
     # print("X.shape", X.shape)
     # print("(X.T @ X).shape", (X.T @ X).shape)
@@ -135,42 +255,190 @@ def calibrate_accelerometer(accel, rots, vicon, time):
         accel_alpha[row] = 3300 / (1023 * k_i)
         accel_beta[row] = - b_i / k_i
 
+
+    # print("\n accel_alpha\n", accel_alpha)
+    # print("\n accel_beta\n", accel_beta)
     return accel_alpha, accel_beta
 
 
+# def calibrate_gyroscope2(gyro, rots, vicon, time):
+#
+#     
+#
+#     ### Calibrating the gyroscope
+#
+#     T = time.shape[0] - 1
+#     
+#     ## Assemble the vector of rotation matrices
+#
+#     R_WB = rots
+#
+#     R_WB = np.transpose(R_WB, axes=(2, 0, 1))
+#
+#     R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
+#     R_WB[:, 3, 3] = 1
+#
+#
+#     ## Preprocess omegaRaw_B
+#
+#     omegaRaw_B = gyro.T
+#
+#     omegaRaw_B = np.pad(omegaRaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
+#
+#     omegaRaw_B = omegaRaw_B.reshape(-1, 1, 4)
+#
+#
+#
+#     # Calculate omegaTrue_B
+#
+#     omegaTrue_B = np.zeros((T-1, 1, 4))
+#
+#     for i in range(T-2):
+#
+#         R_i = R_WB[i]
+#
+#         dt = time[i+1] - time[i]
+#         
+#         Rdot_i = (R_WB[i+1] - R_WB[i]) / dt
+#
+#         # Rdot_i = (R_WB[i+1] @ R_WB[i].T) / dt
+#
+#         omegaTrue_skew_i = (np.linalg.inv(R_i) @ Rdot_i)
+#
+#         omegaTrue_W = np.hstack((unskew(omegaTrue_skew_i), [[1]]))
+#
+#         omegaTrue_B[i] = omegaTrue_W @ R_WB[i+1]
+#
+#
+#
+#     ## Trimming
+#     omegaTrue_B = omegaTrue_B[:-1, :]
+#     omegaRaw_B = omegaRaw_B[:-1, :]
+#
+#
+#     trim_range = (1000, 4000)
+#     omegaTrue_B = omegaTrue_B[trim_range[0]:trim_range[1], :]
+#     omegaRaw_B = omegaRaw_B[trim_range[0]:trim_range[1], :]
+#
+#
+#
+#     X = np.squeeze(omegaRaw_B)
+#     Y = np.squeeze(omegaTrue_B)
+#
+#     # print("X.shape", X.shape)
+#     # print("Y.shape", Y.shape)
+#     # print("(X.T @ X).shape", (X.T @ X).shape)
+#
+#
+#     K_gyro = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
+#     # print("K_gyro\n", K_gyro)
+#
+#
+#
+#     ## Now solve for accel alpha and beta
+#     
+#     gyro_alpha = np.zeros(3)
+#     gyro_beta = np.zeros(3)
+#
+#     for row in range(K_gyro.shape[0]-1):
+#         k_i = K_gyro[row][row]
+#         b_i = K_gyro[row][-1]
+#        
+#         gyro_alpha[row] = (3300 / (1023 * k_i))
+#         gyro_beta[row] = - b_i / k_i
+#
+#
+#
+#     return gyro_alpha, gyro_beta
 
-def calibrate_gyroscope(gyro, rots, vicon, time):
+
+def get_gyroscope_calibration(data_num=1):
+
+        #load data
+    imu = io.loadmat('imu/imuRaw'+str(data_num)+'.mat')
+    time = imu['ts'].astype(float)
+    time = np.squeeze(time)
+    time = time - time[0]
+    # T = time.shape[0]
+
+    vicon_rotation_matrices, _, _, _, time_vicon = get_vicon_data(data_num)
+    # print("T", T)
+    # print("\n time_vicon.shape[0]\n", time_vicon.shape[0])
+    # T = min(T, vicon_rotation_matrices.shape[0])
+    # print("updated T", T)
+    accel = imu['vals'][0:3,:].astype(float)
+    accel[0] = -accel[0]
+    accel[1] = -accel[1]
+    accel = accel.T
+
+    gyro = imu['vals'][3:6,:].astype(float)
+    gyro = gyro.T
+    gyro = gyro[:, [1, 2, 0]]
+
+
+    T = min(accel.shape[0], gyro.shape[0], vicon_rotation_matrices.shape[0], time.shape[0])
+
+
+    gyro = gyro[:T]
+    vicon_rotation_matrices = vicon_rotation_matrices[:T]
+    time = time[:T]
+    accel = accel[:T]
+
+
+    ## Formatting the data for linear regression step
 
     
-
-    ### Calibrating the gyroscope
-
-    T = time.shape[0] - 1
-    
-    ## Assemble the vector of rotation matrices
-
-    R_WB = rots
-
-    R_WB = np.transpose(R_WB, axes=(2, 0, 1))
+    R_WB = np.copy(vicon_rotation_matrices)
 
     R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
     R_WB[:, 3, 3] = 1
 
 
+
+
+
+
+
+    # ### Calibrating the gyroscope
+    #
+    # T = time.shape[0] - 1
+    # 
+    # ## Assemble the vector of rotation matrices
+    #
+    # R_WB = rots
+    #
+    # R_WB = np.transpose(R_WB, axes=(2, 0, 1))
+    #
+    # R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
+    # R_WB[:, 3, 3] = 1
+    #
+
     ## Preprocess omegaRaw_B
 
-    omegaRaw_B = gyro.T
+
+
+
+    # print("gyro.shape\n", gyro.shape)
+    # print("type(gyro), \n", type(gyro))
+
+
+
+    omegaRaw_B = np.copy(gyro)
 
     omegaRaw_B = np.pad(omegaRaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
 
     omegaRaw_B = omegaRaw_B.reshape(-1, 1, 4)
 
+    # print("omegaRaw_B", omegaRaw_B)
+
 
 
     # Calculate omegaTrue_B
 
-    omegaTrue_B = np.zeros((T-1, 1, 4))
-
+    omegaTrue_B = np.zeros((T, 1, 4))
+    # print("\n T \n", T)
+    # print("\n R_WB.shape \n", R_WB.shape)
+    # print("\n omegaRaw_B.shape \n", omegaRaw_B.shape)
     for i in range(T-2):
 
         R_i = R_WB[i]
@@ -222,14 +490,15 @@ def calibrate_gyroscope(gyro, rots, vicon, time):
         k_i = K_gyro[row][row]
         b_i = K_gyro[row][-1]
        
-        gyro_alpha[row] = (3300 / (1023 * k_i))
+        gyro_alpha[row] = (3300 / (1023 * k_i))# * (np.pi/180)
         gyro_beta[row] = - b_i / k_i
 
 
-
+    # print("\n gyro_alpha \n", gyro_alpha)
+    # print("\n gyro_beta \n", gyro_beta)
     return gyro_alpha, gyro_beta
 
-def get_calibrated_imu_data(data_num):
+def get_calibrated_imu_data(data_num, recalibrate=False):
 
     #load data
     imu = io.loadmat('imu/imuRaw'+str(data_num)+'.mat')
@@ -248,22 +517,48 @@ def get_calibrated_imu_data(data_num):
     gyro = imu['vals'][3:6,:].astype(float)
     gyro = gyro.T
     gyro = gyro[:, [1, 2, 0]]
-    gyro[0] = gyro[0]
-    gyro[1] = gyro[1]
     gyro = gyro[:T]
 
 
-    
-    
-    # gyro_alpha, gyro_beta = calibrate_gyroscope()
-  
-    
+    if recalibrate:
 
-    accel_alpha = np.full(3, 35.0)
-    accel_beta = np.array([-510.0, -500.0, 500.0])
+        accel_alphas, accel_betas = np.zeros((3, 3)), np.zeros((3, 3))
+        gyro_alphas, gyro_betas = np.zeros((3, 3)), np.zeros((3, 3))
+        for data_num in range(1, 4):
+            accel_alphas[data_num-1], accel_betas[data_num-1] = get_accelerometer_calibration(data_num)
+            gyro_alphas[data_num-1], gyro_betas[data_num-1] = get_gyroscope_calibration(data_num)
 
-    gyro_alpha = np.full(3, 200)
-    gyro_beta = np.array([347, 347, 347])
+            # print("\n\n Accelerometer calibration from dataset ", data_num, ": \n")
+            # print("\t alpha = ", accel_alpha, "\n\t beta = ", accel_beta)
+            #
+            # print("\n\n Gyroscope calibration from dataset ", data_num, ": \n")
+            # print("\n\t alpha = ", gyro_alpha, "\n\t beta = ", gyro_beta)
+            print("\n Calibrated accelerometer alphas: \n", accel_alphas)
+            print("\n Calibrated accelerometer betas: \n", accel_betas)
+            print("\n Calibrated gyroscope alphas: \n", gyro_alphas)
+            print("\n Calibrated gyroscope betas: ", gyro_betas)
+
+
+    else:
+
+        # Hardcoded values
+        # accel_alpha = np.full(3, 35.0)
+        accel_beta = np.array([-510.0, -500.0, 500.0])
+        #
+        # gyro_alpha = np.full(3, 200)
+        # gyro_beta = np.array([347, 347, 347])
+
+        # Hardcoded values
+        accel_alpha = np.array([35.5, 35.0, 36.5])
+        accel_beta = np.array([-510.0, -502.0, 489.0])
+
+        gyro_alpha = np.array([259.0, 284.0, 274])
+        gyro_beta = np.array([339.5, 358.0, 350.0])
+
+
+
+
+
 
     accel = (accel - accel_beta) * (3300 / (1023 * accel_alpha))
     gyro = (gyro - gyro_beta) * (3300.0 / (1023.0 * gyro_alpha)) * (np.pi/180)
@@ -324,23 +619,20 @@ def generate_sigma_points(mu, cov):
 
         # Drop index i from range [0, 2n] to [0, n] (by taking remainder from i / n)
         scaled_idx = i % n
+
         # Extract column from sqrt_cov
         sqrt_cov_col = sqrt_cov[:, scaled_idx]
 
         # Negative sign for second half of the 2n sigma points
         sign = 1 if i < n else -1
 
-        ## Form the "multidimensional standard deviation" 6x1 vector
-        variation = (sign * np.sqrt(n) * sqrt_cov_col).reshape(6, 1)
+        # Form the "multidimensional standard deviation" 6x1 vector
+        variation = sign * np.sqrt(n) * sqrt_cov_col
+
+        variation_q = Quaternion(scalar=1, vec=variation[:3])
         
-
-        # xi_q = (vec2quat(mu[:4]) * aa2quat(variation[:3]))
-
-        variation_q = Quaternion(scalar=1, vec=variation[:3].squeeze())
-        xi_q = (vec2quat(mu[:4]) * variation_q)
-        # preventQuatJump(xi_q)
-        # xi_q.normalize()
-        xi_q = xi_q.q.reshape(4, 1)
+        # Create this sigma point by adding the variation to the mean
+        xi_q = (vec2quat(mu[:4]) * variation_q).q.reshape(4, 1)
         xi_w = mu[-3:].reshape(3, 1) + variation[-3:].reshape(3, 1)
 
         Xi[i] = np.vstack((xi_q.reshape(-1, 1),
@@ -351,7 +643,7 @@ def generate_sigma_points(mu, cov):
 
 
 
-def quat_average(quats, quat_initial_guess=Quaternion()):
+def quat_average(quats, threshold=1e-5, quat_initial_guess=Quaternion()):
     ## Initialize
     mean = vec2quat(quat_initial_guess)
     covariance = np.eye(3) * 0.001
@@ -376,11 +668,7 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
         ei_mean_quat = aa2quat(ei_mean, normalize=True)
         mean = (ei_mean_quat * mean)
         mean.normalize()
-        # preventQuatJump(mean)
         ## Check if error is small enough to terminate
-        threshold = 1e-5
-
-        
         if (np.linalg.norm(ei_mean) < threshold):
             covariance = np.eye(3) * 0.00
             w = 1 / (2 * n)
@@ -388,14 +676,7 @@ def quat_average(quats, quat_initial_guess=Quaternion()):
             for e in Errors:
                 covariance += w * e @ e.T
             return mean, covariance, Errors
-
-        Errors = np.zeros((2 * n, 3))
-    # w = 1 / (2 * n)
-    # covariance = np.eye(3) * 0.00
-    # # print("GD FAILED\n\n\n")
-    # for e in Errors:
-    #     covariance += w * e @ e.T
-    # return mean, covariance, Errors
+    Errors = np.zeros((2 * n, 3))
 
 
 def reconstruct_state_distribution(Xi, mu_kgk, dt):
@@ -431,17 +712,13 @@ def reconstruct_state_distribution(Xi, mu_kgk, dt):
 
 def initialize_variables():
 
+    mean_quat = [1, 0, 0, 0]
+    mean_omega = [0, 0, 0]
+    mean = np.hstack((mean_quat, mean_omega))
 
-    quat = Quaternion()
-    quat.from_axis_angle(np.array([0, 0, 0]))
-    mean = np.hstack((quat.q, [0, 0, 0]))
-
-    # print("mean", mean)
-
-    covariance = np.eye(6) * 0.001
-
-    R = np.eye(6) * 2.1
-    Q = np.eye(6) * 2.1
+    covariance = np.eye(6)
+    R = np.eye(6) 
+    Q = np.eye(6) * 5.0
 
     n = 6
     
@@ -510,11 +787,11 @@ def process_model(sigma_points, dt):
 
 
 
-def estimate_rot(data_num=1, time_steps=999999):
+def estimate_rot(data_num=1, enable_plot=False, recalibrate=False, time_steps=999999):
 
     mu_kgk, sigma_kgk, R, Q, n = initialize_variables()
 
-    accel, gyro, time, Y_imu = get_calibrated_imu_data(data_num)
+    accel, gyro, time, Y_imu = get_calibrated_imu_data(data_num, recalibrate=recalibrate)
 
     T = min(time.shape[0], time_steps)
 
@@ -524,6 +801,11 @@ def estimate_rot(data_num=1, time_steps=999999):
 
     ukf_orientations = np.zeros((T, 4))
     ukf_orientations[0, 0] = 1
+
+    ukf_angular_velocities = np.zeros((T, 3))
+
+    ukf_covariances = np.zeros((T, 6, 6))
+
     roll = np.zeros((T))
     pitch = np.zeros((T))
     yaw = np.zeros((T))
@@ -614,6 +896,10 @@ def estimate_rot(data_num=1, time_steps=999999):
         # q_kp1gkp1.normalize()
         ukf_orientations[k+1] = q_kp1gkp1.q
 
+        ukf_angular_velocities[k+1] = mu_kp1gkp1[-3:].squeeze()
+
+        ukf_covariances[k+1] = sigma_kp1gkp1
+
 
         roll[k+1], pitch[k+1], yaw[k+1] = q_kp1gkp1.euler_angles() 
 
@@ -624,7 +910,10 @@ def estimate_rot(data_num=1, time_steps=999999):
 
     ukf_orientations_rpy = roll, pitch, yaw
 
-    plot(ukf_orientations, ukf_orientations_rpy, data_num)
+
+    if enable_plot:
+        print("\n PLOTTING... \n")
+        plot(ukf_orientations, ukf_angular_velocities, ukf_covariances, ukf_orientations_rpy, data_num)
 
 
 
@@ -673,20 +962,51 @@ def get_vicon_data(data_num=1):
     time = np.squeeze(time)
     time = time - time[0]
 
+    T = vicon_rotation_matrices.shape[0]
+
+    R_WB = vicon_rotation_matrices
+
+    omegaTrue_B = np.zeros((T, 3))
+    print("omegaTrue_B", omegaTrue_B)
+    for i in range(T-2):
+
+        R_i = R_WB[i]
+
+        dt = time[i+1] - time[i]
+        
+        Rdot_i = (R_WB[i+1] - R_WB[i]) / dt
+
+        # Rdot_i = (R_WB[i+1] @ R_WB[i].T) / dt
+
+        omegaTrue_skew_i = (np.linalg.inv(R_i) @ Rdot_i)
+
+        # omegaTrue_W = np.hstack((unskew(omegaTrue_skew_i), [[1]]))
+        omegaTrue_W = unskew(omegaTrue_skew_i)
+        print("omegaTrue_W.shape", omegaTrue_W.shape)
+        print("R_WB[i+1].shape", R_WB[i+1].shape)
+        value = (omegaTrue_W @ R_WB[i+1]).squeeze()
+        print("value", value)
+        print("omegaTrue_B", omegaTrue_B)
+        omegaTrue_B[i, :] = value 
+        print("omegaTrue_B[i]", omegaTrue_B[i])
 
 
-    return vicon_orientations_rpy, vicon_orientations, time
+
+    print("omegaTrue_B", omegaTrue_B)
+
+
+    return vicon_rotation_matrices, omegaTrue_B, vicon_orientations_rpy, vicon_orientations, time
 
 
 
-def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
+def plot(ukf_orientations, ukf_angular_velocities, ukf_covariances, ukf_orientations_rpy, data_num, time_steps=999999):
 
 
 
     # ukf_orientations_rpy = estimate_rot(data_num, time_steps)
     _, _, _, imu_observations = get_calibrated_imu_data(data_num)
 
-    vicon_orientations_rpy, vicon_orientations, time = get_vicon_data(data_num)
+    _, vicon_angular_velocities, vicon_orientations_rpy, vicon_orientations, time = get_vicon_data(data_num)
 
     T = min(ukf_orientations_rpy[0].shape[0], vicon_orientations_rpy.shape[0], time_steps)
 
@@ -776,14 +1096,91 @@ def plot(ukf_orientations, ukf_orientations_rpy, data_num, time_steps=999999):
     plt.legend()
     plt.title("Vicon Orientation quaternion")
 
+
+
+
+    plt.figure(3)
+
+    # Mean of quaternion
+    plt.subplot(3, 1, 1)
+    plt.plot(time[:T], ukf_orientations[:T, 0],
+             label="w", alpha=0.4)
+    plt.plot(time[:T], ukf_orientations[:T, 1],
+             label="x", alpha=0.4)
+    plt.plot(time[:T], ukf_orientations[:T, 2],
+             label="y", alpha=0.4)
+    plt.plot(time[:T], ukf_orientations[:T, 3],
+             label="z", alpha=0.4)
+    plt.legend()
+    plt.title("Quaternion Mean from UKF")
+
+    plt.subplot(3, 1, 2)
+    signs, abs_slogdets = np.linalg.slogdet(ukf_covariances[:T, :3, :3])
+    quat_slogdets = signs * abs_slogdets
+
+    plt.plot(time[:T], quat_slogdets,
+             label='slogdet(cov)', alpha=0.4)
+    plt.legend()
+    plt.title("signed log determinant of quaternion covariance from UKF")
+
+    plt.subplot(3, 1, 3)
+    plt.plot(time[:T], vicon_orientations[:T, 0],
+             label="w", alpha=0.4)
+    plt.plot(time[:T], vicon_orientations[:T, 1],
+             label="x", alpha=0.4)
+    plt.plot(time[:T], vicon_orientations[:T, 2],
+             label="y", alpha=0.4)
+    plt.plot(time[:T], vicon_orientations[:T, 3],
+             label="z", alpha=0.4)
+    plt.legend()
+    plt.title("Quaternion from Vicon")
+
+
+
+    plt.figure(4)
+    plt.subplot(3, 1, 1)
+    plt.plot(time[:T], ukf_angular_velocities[:T, 0],
+             label="wx", alpha=0.4)
+    plt.plot(time[:T], ukf_angular_velocities[:T, 1],
+             label="wy", alpha=0.4)
+    plt.plot(time[:T], ukf_angular_velocities[:T, 2],
+             label="wz", alpha=0.4)
+    plt.legend()
+    plt.title("Angular Velocity Mean from UKF")
+
+    plt.subplot(3, 1, 2)
+    signs, abs_slogdets = np.linalg.slogdet(ukf_covariances[:T, -3:, -3:])
+    angular_velocity_slogdets = signs * abs_slogdets
+
+    plt.plot(time[:T], angular_velocity_slogdets,
+             label='slogdet(cov)', alpha=0.4)
+    plt.legend()
+    plt.title("signed log determinant of angular velocity covariance from UKF")
+
+
+    plt.subplot(3, 1, 3)
+    plt.plot(time[:T], vicon_angular_velocities[:T, 0],
+             label="wx", alpha=0.4)
+    plt.plot(time[:T], vicon_angular_velocities[:T, 1],
+             label="wy", alpha=0.4)
+    plt.plot(time[:T], vicon_angular_velocities[:T, 2],
+             label="wz", alpha=0.4)
+    plt.title("Angular Velocity from Vicon")
+
     plt.show()
 
 
 
 
 
+
+
         
-estimate_rot(1)
+# estimate_rot(1, enable_plot=True, recalibrate=False)
+
+
+# calibrate_gyroscope(1)
+# calibrate_accelerometer(1)
 
 
 
