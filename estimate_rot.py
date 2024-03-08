@@ -4,14 +4,8 @@ import scipy
 from quaternion import Quaternion   # numpy-quaternio
 import math
 
-
-
-
 import matplotlib.pyplot as plt
 
-
-
-import time as TIME
 
 #data files are numbered on the server.
 #for exmaple imuRaw1.mat, imuRaw2.mat and so on.
@@ -19,127 +13,19 @@ import time as TIME
 #reads in the corresponding imu Data, and estimates
 #roll pitch and yaw using an unscented kalman filter
 
-# def quaternion_weighted_mean(quats):
-#
-#     ## Calculate mean quaternion via equation 13 in http://www.acsu.buffalo.edu/%7Ejohnc/ave_quat07.pdf
-#
-#     # def quaternion_weighted_sum(Q: Sequence[np.ndarray], weights: Sequence[float]) -> np.ndarray:
-#     # """ Quaternion weighted mean as per http://www.acsu.buffalo.edu/~johnc/ave_quat07.pdf.
-#     # Args:
-#     #     Q: a (n, 4) array of scalar-first quaternions
-#     #     weights: a (n,) array of weights. They need not sum to 1.
-#     # Return:
-#     #     A (4,) array for the resulting quaternion.
-#     # """
-#     # A = sum(w * (np.outer(q, q)) for q, w in zip(Q, weights))
-#     # # Get the eigenvector corresponding to largest eigenvalue.
-#     # return np.linalg.eigh(A)[1][:, -1]
-#
-#
-#
-#     # M = np.zeros((4, 4))
-#
-#     w = 1/12
-#     for q in quats:
-#
-#         # add weighted outer product of q w/ itself
-#
-#         # q = Quaternion( scalar=q[0], vec=q[1:4])
-#
-#
-#         M += w * q @ q.T
-#
-#
-#     # CHECK: that this gets the evec for the LARGEST eval
-#     mean_quaternion = np.linalg.eig(M)[1][:, -1]
-#     
-#     return Quaternion(scalar=mean_quaternion[0], vec=mean_quaternion[1:4])
+
+''' Implemented below is an Unscented Kalman Filter that aims to estimate the orientation of a falling IMU in 3D space. '''
+
+''' Implemented by Griffin Addison in early March, 2024. '''
+
+''' The function 'estimate_rot()' is where main, high-level UKF loop occurs. '''
 
 
-def preventQuatJump(q):
-    if q.scalar() < 0:
-        # q.scalar() = -q.scalar()
-        # q.vec() = -q.vec()
-
-        q = Quaternion(scalar = -q.scalar(), vec = -q.vec())
-
-# def skew(v):
-#     x, y, z = v
-#     return np.array([[0, -z, y],
-#                      [z, 0, -x],
-#                      [-y, x, 0]])
-#
 def unskew(m):
     return np.array([[(m[2][1] - m[1][2])/2, (m[0][2] - m[2][0])/2, (m[1][0] - m[0][1])/2]])
-# #
-#
-#
-# def calibrate_accelerometer2(accel, rots, vicon, time):
-#     
-#     T = time.shape[0] + 1
-#
-#     # Transpose to fit my math better:w
-#     ARaw_B = accel.T
-#     # Append constant term to introduce bias in the math
-#     ones_column = np.ones((ARaw_B.shape[0], 1))
-#     ARaw_B = np.hstack((ARaw_B, ones_column))
-#
-#     ## Assemble the vector of rotation matrices
-#
-#     # Transpose each 3x3 (by swapping the first 2 dims)
-#     R_WB_transpose = np.transpose(rots, axes=(1, 0, 2))
-#     # Pad each 3x3 rot matrix into a 4x4
-#     # Specifically, add to the start and end of each dimension (0,1), (0,1), (0,1) many constant_values
-#     R_WB_transpose = np.pad(R_WB_transpose, ((0, 1), (0, 1), (0, 0)), mode='constant', constant_values=0)
-#     # Set bottom right term of each homogenized rotation matrix to 1
-#     R_WB_transpose[3, 3, :] = 1 
-#     # But actually numpy's batch dimension should be the first for both things
-#     R_WB_transpose = np.transpose(R_WB_transpose, axes=(2, 0, 1))
-#
-#
-#
-#
-#
-#     # Assemble the vector of ground truth a_W (just gravity) A_W
-#     A_W = np.zeros((T-1, 4, 1))
-#     A_W[:, 2, 0] = 9.81
-#     A_W[:, 3, 0] = 1
-#
-#
-#     
-#     ## Solve the linear regression problem
-#     
-#     # Create Y and X based upon our problem's variables
-#     Y = np.matmul(R_WB_transpose, A_W)
-#     Y = np.squeeze(Y)
-#     X = np.squeeze(ARaw_B)
-#
-#     # print("Y.shape", Y.shape)
-#     # print("X.shape", X.shape)
-#     # print("(X.T @ X).shape", (X.T @ X).shape)
-#
-#     # Compute K calibration gains using linear regression closed form
-#     K_accel = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
-#
-#
-#     # print("K_accel", K_accel)
-#     ## Now solve for accel alpha and beta
-#     
-#     accel_alpha = np.zeros(3)
-#     accel_beta = np.zeros(3)
-#
-#     for row in range(K_accel.shape[0]-1):
-#         k_i = K_accel[row][row]
-#         b_i = K_accel[row][-1]
-#
-#         accel_alpha[row] = 3300 / (1023 * k_i)
-#         accel_beta[row] = - b_i / k_i
-#
-#     return accel_alpha, accel_beta
 
 def get_accelerometer_calibration(data_num=1):
    
-
 
     #load data
     imu = io.loadmat('imu/imuRaw'+str(data_num)+'.mat')
@@ -149,10 +35,6 @@ def get_accelerometer_calibration(data_num=1):
     # T = time.shape[0]
 
     vicon_rotation_matrices, _, _, _, time_vicon = get_vicon_data(data_num)
-    # print("T", T)
-    # print("\n time_vicon.shape[0]\n", time_vicon.shape[0])
-    # T = min(T, vicon_rotation_matrices.shape[0])
-    # print("updated T", T)
     accel = imu['vals'][0:3,:].astype(float)
     accel[0] = -accel[0]
     accel[1] = -accel[1]
@@ -171,40 +53,12 @@ def get_accelerometer_calibration(data_num=1):
     accel = accel[:T]
     vicon_rotation_matrices = vicon_rotation_matrices[:T]
 
-    print("gyro.shape", gyro.shape)
-    print("accel.shape", accel.shape)
-
-
-
-    # T = time.shape[0] + 1
-
-    # Transpose to fit my math better:w
-    # ARaw_B = accel.T
-    # Append constant term to introduce bias in the math
-    # ones_column = np.ones((ARaw_B.shape[0], 1))
-    # ARaw_B = np.hstack((ARaw_B, ones_column))
 
     ARaw_B = accel
 
     ARaw_B = np.pad(ARaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
 
     ARaw_B = ARaw_B.reshape((-1, 1, 4))
-
-    # print("\n ARaw_B\n", ARaw_B)
-    # print("\n ARaw_B.shape\n", ARaw_B.shape)
-
-    ## Assemble the vector of rotation matrices
-
-    # # Transpose each 3x3 (by swapping the first 2 dims)
-    # R_WB_transpose = np.transpose(rots, axes=(1, 0, 2))
-    # # Pad each 3x3 rot matrix into a 4x4
-    # # Specifically, add to the start and end of each dimension (0,1), (0,1), (0,1) many constant_values
-    # R_WB_transpose = np.pad(R_WB_transpose, ((0, 1), (0, 1), (0, 0)), mode='constant', constant_values=0)
-    # # Set bottom right term of each homogenized rotation matrix to 1
-    # R_WB_transpose[3, 3, :] = 1 
-    # # But actually numpy's batch dimension should be the first for both things
-    # R_WB_transpose = np.transpose(R_WB_transpose, axes=(2, 0, 1))
-    #
 
     R_WB = np.copy(vicon_rotation_matrices)
 
@@ -214,36 +68,19 @@ def get_accelerometer_calibration(data_num=1):
     R_WB_transpose = np.transpose(R_WB, axes=(0, 2, 1))
 
 
-    # print("\n R_WB_transpose\n", R_WB_transpose)
-    # print("\n R_WB_transpose.shape\n", R_WB_transpose.shape)
-
-
-
-
     # Assemble the vector of ground truth a_W (just gravity) A_W
     A_W = np.zeros((T, 4, 1))
     A_W[:, 2, 0] = 9.81
     A_W[:, 3, 0] = 1
 
-    # print("TTTTT = ", T)
-    # print("A_W.shape", A_W.shape) 
-    ## Solve the linear regression problem
-    
     # Create Y and X based upon our problem's variables
     Y = np.matmul(R_WB_transpose, A_W)
     Y = np.squeeze(Y)
     X = np.squeeze(ARaw_B)
-    #
-    # print("Y.shape", Y.shape)
-    # print("X.shape", X.shape)
-    # print("(X.T @ X).shape", (X.T @ X).shape)
 
     # Compute K calibration gains using linear regression closed form
     K_accel = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
 
-
-    # print("K_accel", K_accel)
-    ## Now solve for accel alpha and beta
     
     accel_alpha = np.zeros(3)
     accel_beta = np.zeros(3)
@@ -256,100 +93,7 @@ def get_accelerometer_calibration(data_num=1):
         accel_beta[row] = - b_i / k_i
 
 
-    # print("\n accel_alpha\n", accel_alpha)
-    # print("\n accel_beta\n", accel_beta)
     return accel_alpha, accel_beta
-
-
-# def calibrate_gyroscope2(gyro, rots, vicon, time):
-#
-#     
-#
-#     ### Calibrating the gyroscope
-#
-#     T = time.shape[0] - 1
-#     
-#     ## Assemble the vector of rotation matrices
-#
-#     R_WB = rots
-#
-#     R_WB = np.transpose(R_WB, axes=(2, 0, 1))
-#
-#     R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
-#     R_WB[:, 3, 3] = 1
-#
-#
-#     ## Preprocess omegaRaw_B
-#
-#     omegaRaw_B = gyro.T
-#
-#     omegaRaw_B = np.pad(omegaRaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
-#
-#     omegaRaw_B = omegaRaw_B.reshape(-1, 1, 4)
-#
-#
-#
-#     # Calculate omegaTrue_B
-#
-#     omegaTrue_B = np.zeros((T-1, 1, 4))
-#
-#     for i in range(T-2):
-#
-#         R_i = R_WB[i]
-#
-#         dt = time[i+1] - time[i]
-#         
-#         Rdot_i = (R_WB[i+1] - R_WB[i]) / dt
-#
-#         # Rdot_i = (R_WB[i+1] @ R_WB[i].T) / dt
-#
-#         omegaTrue_skew_i = (np.linalg.inv(R_i) @ Rdot_i)
-#
-#         omegaTrue_W = np.hstack((unskew(omegaTrue_skew_i), [[1]]))
-#
-#         omegaTrue_B[i] = omegaTrue_W @ R_WB[i+1]
-#
-#
-#
-#     ## Trimming
-#     omegaTrue_B = omegaTrue_B[:-1, :]
-#     omegaRaw_B = omegaRaw_B[:-1, :]
-#
-#
-#     trim_range = (1000, 4000)
-#     omegaTrue_B = omegaTrue_B[trim_range[0]:trim_range[1], :]
-#     omegaRaw_B = omegaRaw_B[trim_range[0]:trim_range[1], :]
-#
-#
-#
-#     X = np.squeeze(omegaRaw_B)
-#     Y = np.squeeze(omegaTrue_B)
-#
-#     # print("X.shape", X.shape)
-#     # print("Y.shape", Y.shape)
-#     # print("(X.T @ X).shape", (X.T @ X).shape)
-#
-#
-#     K_gyro = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
-#     # print("K_gyro\n", K_gyro)
-#
-#
-#
-#     ## Now solve for accel alpha and beta
-#     
-#     gyro_alpha = np.zeros(3)
-#     gyro_beta = np.zeros(3)
-#
-#     for row in range(K_gyro.shape[0]-1):
-#         k_i = K_gyro[row][row]
-#         b_i = K_gyro[row][-1]
-#        
-#         gyro_alpha[row] = (3300 / (1023 * k_i))
-#         gyro_beta[row] = - b_i / k_i
-#
-#
-#
-#     return gyro_alpha, gyro_beta
 
 
 def get_gyroscope_calibration(data_num=1):
@@ -359,13 +103,8 @@ def get_gyroscope_calibration(data_num=1):
     time = imu['ts'].astype(float)
     time = np.squeeze(time)
     time = time - time[0]
-    # T = time.shape[0]
 
     vicon_rotation_matrices, _, _, _, time_vicon = get_vicon_data(data_num)
-    # print("T", T)
-    # print("\n time_vicon.shape[0]\n", time_vicon.shape[0])
-    # T = min(T, vicon_rotation_matrices.shape[0])
-    # print("updated T", T)
     accel = imu['vals'][0:3,:].astype(float)
     accel[0] = -accel[0]
     accel[1] = -accel[1]
@@ -395,50 +134,14 @@ def get_gyroscope_calibration(data_num=1):
 
 
 
-
-
-
-
-    # ### Calibrating the gyroscope
-    #
-    # T = time.shape[0] - 1
-    # 
-    # ## Assemble the vector of rotation matrices
-    #
-    # R_WB = rots
-    #
-    # R_WB = np.transpose(R_WB, axes=(2, 0, 1))
-    #
-    # R_WB = np.pad(R_WB, ((0, 0), (0, 1), (0, 1)), mode='constant', constant_values=0)
-    # R_WB[:, 3, 3] = 1
-    #
-
-    ## Preprocess omegaRaw_B
-
-
-
-
-    # print("gyro.shape\n", gyro.shape)
-    # print("type(gyro), \n", type(gyro))
-
-
-
     omegaRaw_B = np.copy(gyro)
 
     omegaRaw_B = np.pad(omegaRaw_B, ((0, 0), (0, 1)), mode='constant', constant_values=1)
 
     omegaRaw_B = omegaRaw_B.reshape(-1, 1, 4)
 
-    # print("omegaRaw_B", omegaRaw_B)
-
-
-
-    # Calculate omegaTrue_B
 
     omegaTrue_B = np.zeros((T, 1, 4))
-    # print("\n T \n", T)
-    # print("\n R_WB.shape \n", R_WB.shape)
-    # print("\n omegaRaw_B.shape \n", omegaRaw_B.shape)
     for i in range(T-2):
 
         R_i = R_WB[i]
@@ -471,17 +174,8 @@ def get_gyroscope_calibration(data_num=1):
     X = np.squeeze(omegaRaw_B)
     Y = np.squeeze(omegaTrue_B)
 
-    # print("X.shape", X.shape)
-    # print("Y.shape", Y.shape)
-    # print("(X.T @ X).shape", (X.T @ X).shape)
-
 
     K_gyro = (np.linalg.inv(X.T @ X) @ X.T @ Y).T
-    # print("K_gyro\n", K_gyro)
-
-
-
-    ## Now solve for accel alpha and beta
     
     gyro_alpha = np.zeros(3)
     gyro_beta = np.zeros(3)
@@ -492,10 +186,6 @@ def get_gyroscope_calibration(data_num=1):
        
         gyro_alpha[row] = (3300 / (1023 * k_i))# * (np.pi/180)
         gyro_beta[row] = - b_i / k_i
-
-
-    # print("\n gyro_alpha \n", gyro_alpha)
-    # print("\n gyro_beta \n", gyro_beta)
     return gyro_alpha, gyro_beta
 
 def get_calibrated_imu_data(data_num, recalibrate=False):
@@ -528,11 +218,6 @@ def get_calibrated_imu_data(data_num, recalibrate=False):
             accel_alphas[data_num-1], accel_betas[data_num-1] = get_accelerometer_calibration(data_num)
             gyro_alphas[data_num-1], gyro_betas[data_num-1] = get_gyroscope_calibration(data_num)
 
-            # print("\n\n Accelerometer calibration from dataset ", data_num, ": \n")
-            # print("\t alpha = ", accel_alpha, "\n\t beta = ", accel_beta)
-            #
-            # print("\n\n Gyroscope calibration from dataset ", data_num, ": \n")
-            # print("\n\t alpha = ", gyro_alpha, "\n\t beta = ", gyro_beta)
             print("\n Calibrated accelerometer alphas: \n", accel_alphas)
             print("\n Calibrated accelerometer betas: \n", accel_betas)
             print("\n Calibrated gyroscope alphas: \n", gyro_alphas)
@@ -555,22 +240,14 @@ def get_calibrated_imu_data(data_num, recalibrate=False):
         gyro_alpha = np.array([259.0, 284.0, 274])
         gyro_beta = np.array([339.5, 358.0, 350.0])
 
-
-
-
-
-
     accel = (accel - accel_beta) * (3300 / (1023 * accel_alpha))
     gyro = (gyro - gyro_beta) * (3300.0 / (1023.0 * gyro_alpha)) * (np.pi/180)
 
     
     imu_observations = np.zeros((T, 6, 1))
     
-
-
     imu_observations = np.hstack((accel.reshape(-1, 3, 1),
                                   gyro.reshape(-1, 3, 1)))
-
 
     return accel, gyro, time, imu_observations
 
@@ -655,7 +332,6 @@ def quat_average(quats, threshold=1e-5, quat_initial_guess=Quaternion()):
             quat = vec2quat(quats[i])
             ei_quat = quat * mean.inv()
             ei_quat.normalize()
-            # preventQuatJump(ei_quat)
             ei = ei_quat.axis_angle()
 
             if np.linalg.norm(ei) == 0:
@@ -681,20 +357,18 @@ def quat_average(quats, threshold=1e-5, quat_initial_guess=Quaternion()):
 
 def reconstruct_state_distribution(Xi, mu_kgk, dt):
     
-    n = 6
-    weight = 1 / (2 * n)
-
-    mu_kp1gk_omega = np.zeros((3, 1))
-    sigma_kp1gk_omega = np.zeros((3, 3))
+    
+    weight = 1 / len(Xi)
 
     ## Calculate omega's distribution via weighted mean
-    for i in range(2 * n):
+    mu_kp1gk_omega = np.zeros((3, 1))
+    sigma_kp1gk_omega = np.zeros((3, 3))
+    
+    for i in range(len(Xi)):
         mu_kp1gk_omega += weight * Xi[i, -3:]
-
-    for i in range(2 * n):
+    for i in range(len(Xi)):
         sigma_kp1gk_omega += weight * (Xi[i, -3:] - mu_kp1gk_omega) \
                                     @ (Xi[i, -3:] - mu_kp1gk_omega).T
-
 
     ## Calculate quaternion
     Xi_quats = Xi[:, :4]
@@ -730,19 +404,19 @@ def initialize_variables():
 
 def g(state):
 
-
+    # Ready the variables
     q_k = Quaternion(scalar=state[0, 0], 
                      vec=state[1:4, 0])
-    q_k.normalize()
     g = Quaternion(scalar=0, 
                    vec=[0, 0, 9.81])
+    omega_k = state[4:]
 
+    # Transform g into local(?) frame
     g_prime = q_k.inv() * g * q_k
 
+    # Assign to outputs
     y_acc = g_prime.vec().reshape(-1, 1)
-
-    y_rot = state[4:]
-    
+    y_rot = omega_k
     y_kp1gk = np.vstack((y_acc,
                          y_rot))  
 
@@ -752,6 +426,7 @@ def measurement_model(Xi):
 
     Yi = np.zeros((len(Xi), 6, 1))
     for i in range(Xi.shape[0]):
+        # Calculate the measurement for this state 
         Yi[i] = g(Xi[i])
 
     return Yi
@@ -760,26 +435,27 @@ def measurement_model(Xi):
 # Dynamics (process model)
 def f(x_k, dt):
 
+    # Readying variables
     q_k = vec2quat(x_k[:4])
     omega_k = x_k[4:, 0]
     q_delta = aa2quat(omega_k * dt)
 
+    # predict next state w/ dynamics
     q_kp1 = q_k * q_delta
-    q_kp1.normalize()
-    # preventQuatJump(q_kp1)
     omega_kp1 = omega_k
 
     x_kp1 = np.vstack((q_kp1.q.reshape(4, 1),
                           omega_kp1.reshape(3, 1)))
     return x_kp1
 
-def process_model(sigma_points, dt):
+def process_model(Xi_kgk, dt):
 
-    propagated_sigma_points = np.zeros_like(sigma_points)
-    for i in range(sigma_points.shape[0]):
-        propagated_sigma_points[i] = f(sigma_points[i], dt)
+    Xi_kp1gk = np.zeros_like(Xi_kgk)
+    for i in range(Xi_kgk.shape[0]):
+        # Transform the ith sigma point w/ process model (dynamics) 
+        Xi_kp1gk[i] = f(Xi_kgk[i], dt)
 
-    return propagated_sigma_points
+    return Xi_kp1gk 
 
 
 
@@ -789,81 +465,70 @@ def process_model(sigma_points, dt):
 
 def estimate_rot(data_num=1, enable_plot=False, recalibrate=False, time_steps=999999):
 
+
+    '''SETUP'''
+
+    # Acquire IMU data
+    accel, gyro, time, Y_imu = get_calibrated_imu_data(data_num, recalibrate=recalibrate)
+    T = min(time.shape[0], time_steps)
+    
+    # Initialize tunables
     mu_kgk, sigma_kgk, R, Q, n = initialize_variables()
 
-    accel, gyro, time, Y_imu = get_calibrated_imu_data(data_num, recalibrate=recalibrate)
-
-    T = min(time.shape[0], time_steps)
-
-    tic = TIME.perf_counter()
-    setup_time = TIME.perf_counter() - tic
-
-
+    # Initialize the state variables we will track
     ukf_orientations = np.zeros((T, 4))
     ukf_orientations[0, 0] = 1
-
     ukf_angular_velocities = np.zeros((T, 3))
-
     ukf_covariances = np.zeros((T, 6, 6))
-
     roll = np.zeros((T))
     pitch = np.zeros((T))
     yaw = np.zeros((T))
 
 
-    ## For each time step, 
+    '''FOR EACH TIMESTEP'''
     for k in range(T-1):
-    # for k in range(2):
         
         if k % 500 == 0:
-            step_start_time = TIME.perf_counter()
-            print("\n time step k = ", k)
-        dt = max(time[k+1] - time[k], 0.0001)
+            print("\n Running UKF: ", round((k / T) * 100, 0), "% complete.\n")
 
+        dt = time[k+1] - time[k]  
+
+
+        '''PREDICT NEXT STATE DISTRIBUTION'''
 
         sigma_kgk += R * dt
         Xi = generate_sigma_points(mu_kgk, sigma_kgk)
         Xi_kp1gk = process_model(Xi, dt)
-      
         mu_kp1gk, sigma_kp1gk, Errors = reconstruct_state_distribution(Xi_kp1gk, mu_kgk, dt)
-        
+      
+
+        '''PREDICT NEXT OBSERVATION'''
 
         Yi = measurement_model(Xi_kp1gk)
         yi_bar = np.mean(Yi, axis=0)
 
-        sigma_yy = np.zeros((6, 6))
-        sigma_xy = np.zeros_like(sigma_yy)
 
+
+        '''COMPARE PREDICTIONS WITH OBSERVATIONS TO GET COVARIANCES'''
+
+        sigma_yy, sigma_xy = np.zeros((6, 6)), np.zeros((6, 6))
         weight = 1 / (2 * n)
         for i in range((2 * n)):
    
-
             sigma_yy += weight * np.outer(Yi[i] - yi_bar, Yi[i] - yi_bar)
-            # sigma_yy += weight * (Yi[i] - yi_bar) @ (Yi[i] - yi_bar).T
-          
-
-            # r_W = vec2quat(Xi_kp1gk[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
-            # r_W.normalize()
-            # Wi = np.vstack((r_W.axis_angle().reshape(-1, 1),
-            #                Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
-            #
 
             r_W = vec2quat(Xi_kp1gk[i, :4]) * vec2quat(mu_kp1gk[:4]).inv()
-            # r_W.normalize()
             Wi = np.vstack((r_W.vec().reshape(3, 1),
                             Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
 
 
-            # Wi = np.vstack((Errors[i].reshape(-1, 1),
-            #                  Xi_kp1gk[i, -3:] - mu_kp1gk[-3:]))
-            # sigma_xy += weight * Wi @ (Yi[i] - yi_bar).T
-            #
             sigma_xy += weight * np.outer(Wi, Yi[i] - yi_bar)
 
-
- 
-
         sigma_yy += Q
+
+
+
+        '''COMPUTE KALMAN GAIN TO UPDATE PREDICTION'''
 
         innovation = Y_imu[k+1] - yi_bar
         K = sigma_xy @ np.linalg.inv(sigma_yy)
@@ -871,14 +536,14 @@ def estimate_rot(data_num=1, enable_plot=False, recalibrate=False, time_steps=99
 
         q_kp1gkp1 = aa2quat(Kinnovation[:3]) * vec2quat(mu_kp1gk[:4]) 
         q_kp1gkp1.normalize()
-        # preventQuatJump(q_kp1gkp1)
         mu_kp1gkp1 = np.vstack((q_kp1gkp1.q.reshape(4, 1),
                                 mu_kp1gk[-3:] + Kinnovation[-3:]))
         
-
         sigma_kp1gkp1 = sigma_kp1gk - K @ sigma_yy @ K.T
 
+        
 
+        '''CLEAN AND RECORD DATA'''
 
         ## Make sure quat sign doesn't flip
         prev_max_component_idx = np.argmax(np.abs(ukf_orientations[k]))
@@ -908,6 +573,8 @@ def estimate_rot(data_num=1, enable_plot=False, recalibrate=False, time_steps=99
         sigma_kgk = np.copy(sigma_kp1gkp1)
 
 
+    '''POST-LOOP HOUSEKEEPING'''
+
     ukf_orientations_rpy = roll, pitch, yaw
 
 
@@ -917,14 +584,14 @@ def estimate_rot(data_num=1, enable_plot=False, recalibrate=False, time_steps=99
 
 
 
-    ## Sanitize outputs
-    # roll = roll[np.isfinite(roll)]
-    # pitch = pitch[np.isfinite(pitch)]
-    # yaw = yaw[np.isfinite(yaw)]
-    #
-    # roll = roll[~np.isnan(roll)]
-    # pitch = pitch[~np.isnan(pitch)]
-    # yaw = yaw[~np.isnan(yaw)]
+    # Sanitize outputs
+    roll = roll[np.isfinite(roll)]
+    pitch = pitch[np.isfinite(pitch)]
+    yaw = yaw[np.isfinite(yaw)]
+
+    roll = roll[~np.isnan(roll)]
+    pitch = pitch[~np.isnan(pitch)]
+    yaw = yaw[~np.isnan(yaw)]
 
     return roll,pitch,yaw
 
@@ -967,32 +634,17 @@ def get_vicon_data(data_num=1):
     R_WB = vicon_rotation_matrices
 
     omegaTrue_B = np.zeros((T, 3))
-    print("omegaTrue_B", omegaTrue_B)
     for i in range(T-2):
-
-        R_i = R_WB[i]
-
-        dt = time[i+1] - time[i]
         
+        # Ready the variables
+        dt = time[i+1] - time[i]
+        R_i = R_WB[i]
         Rdot_i = (R_WB[i+1] - R_WB[i]) / dt
-
-        # Rdot_i = (R_WB[i+1] @ R_WB[i].T) / dt
-
+    
         omegaTrue_skew_i = (np.linalg.inv(R_i) @ Rdot_i)
 
-        # omegaTrue_W = np.hstack((unskew(omegaTrue_skew_i), [[1]]))
         omegaTrue_W = unskew(omegaTrue_skew_i)
-        print("omegaTrue_W.shape", omegaTrue_W.shape)
-        print("R_WB[i+1].shape", R_WB[i+1].shape)
-        value = (omegaTrue_W @ R_WB[i+1]).squeeze()
-        print("value", value)
-        print("omegaTrue_B", omegaTrue_B)
-        omegaTrue_B[i, :] = value 
-        print("omegaTrue_B[i]", omegaTrue_B[i])
-
-
-
-    print("omegaTrue_B", omegaTrue_B)
+        omegaTrue_B[i, :] = (omegaTrue_W @ R_WB[i+1]).squeeze()
 
 
     return vicon_rotation_matrices, omegaTrue_B, vicon_orientations_rpy, vicon_orientations, time
@@ -1003,10 +655,11 @@ def plot(ukf_orientations, ukf_angular_velocities, ukf_covariances, ukf_orientat
 
 
 
-    # ukf_orientations_rpy = estimate_rot(data_num, time_steps)
+    '''READY THE DATA'''
     _, _, _, imu_observations = get_calibrated_imu_data(data_num)
 
-    _, vicon_angular_velocities, vicon_orientations_rpy, vicon_orientations, time = get_vicon_data(data_num)
+    _, vicon_angular_velocities, vicon_orientations_rpy, vicon_orientations, time \
+    = get_vicon_data(data_num)
 
     T = min(ukf_orientations_rpy[0].shape[0], vicon_orientations_rpy.shape[0], time_steps)
 
@@ -1023,149 +676,167 @@ def plot(ukf_orientations, ukf_angular_velocities, ukf_covariances, ukf_orientat
         imu_quaternion[i, :] = aa2quat(imu_rpy[i, :]).q
  
 
-    plt.figure(1)
-    plt.subplot(3, 1, 1)
-    # ROLL
-    plt.plot(time[:T], vicon_orientations_rpy[:T, 0], 
-             label="roll_vicon", linestyle='solid', color='r')
-    plt.plot(time[:T], ukf_orientations_rpy[0][:T], 
-             label="roll_ukf", linestyle='dotted', color='r', alpha=0.4)
-    plt.plot(time[:T], imu_rpy[:T, 0],
-             label="roll_imu", linestyle='solid', color='r', alpha=0.4)
-    plt.legend()
-    plt.subplot(3, 1, 2)
-    # PITCH
-    plt.plot(time[:T], vicon_orientations_rpy[:T, 1], 
-             label="pitch_vicon", linestyle='solid', color='g')
-    plt.plot(time[:T], ukf_orientations_rpy[1][:T], 
-             label="pitch_ufk", linestyle='dotted', color='g', alpha=0.4)
-    plt.plot(time[:T], imu_rpy[:T, 1],
-             label="pitch_imu", linestyle='solid', color='g', alpha=0.4)
-    plt.legend()
-    # YAW
-    plt.subplot(3, 1, 3)
-    plt.plot(time[:T], vicon_orientations_rpy[:T, 2], 
-             label="yaw_vicon", linestyle='solid', color='b')
-    plt.plot(time[:T], ukf_orientations_rpy[2][:T], 
-             label="yaw_ufk", linestyle='dotted', color='b', alpha=0.4)
 
+    '''PLOT'''
     
-    plt.title("RPY vicon vs UKF")
-    plt.legend()
-    # plt.show()
+    rpy_fig, (roll_plot, pitch_plot, yaw_plot) = plt.subplots(3, 1)
+    rpy_fig.suptitle("RPY Comparison: UKF v Calibrated IMU v Vicon")
+    rpy_fig.tight_layout()
+
+    roll_plot.set_title("Pitch [rad/s]")
+    roll_plot.plot(time[:T], vicon_orientations_rpy[:T, 0], 
+             label="roll_vicon", linestyle='solid', color='r')
+    roll_plot.plot(time[:T], ukf_orientations_rpy[0][:T], 
+             label="roll_ukf", linestyle='dotted', color='r', alpha=0.4)
+    roll_plot.plot(time[:T], imu_rpy[:T, 0],
+             label="roll_imu", linestyle='solid', color='r', alpha=0.4)
+    roll_plot.set_xlabel("Time [s]")
+    roll_plot.set_ylabel("Rotation [rad]")
+    roll_plot.legend()
+   
+    pitch_plot.set_title("Pitch [rad/s]")
+    pitch_plot.plot(time[:T], vicon_orientations_rpy[:T, 1], 
+             label="pitch_vicon", linestyle='solid', color='g')
+    pitch_plot.plot(time[:T], ukf_orientations_rpy[1][:T], 
+             label="pitch_ufk", linestyle='dotted', color='g', alpha=0.4)
+    pitch_plot.plot(time[:T], imu_rpy[:T, 1],
+             label="pitch_imu", linestyle='solid', color='g', alpha=0.4)
+    pitch_plot.set_xlabel("Time [s]")
+    pitch_plot.set_ylabel("Rotation [rad]")
+    pitch_plot.legend()
+    
+    yaw_plot.set_title("Yaw [rad/s]")
+    yaw_plot.plot(time[:T], vicon_orientations_rpy[:T, 2], 
+             label="yaw_vicon", linestyle='solid', color='b')
+    yaw_plot.plot(time[:T], ukf_orientations_rpy[2][:T], 
+             label="yaw_ufk", linestyle='dotted', color='b', alpha=0.4)
+    yaw_plot.set_xlabel("Time [s]")
+    yaw_plot.set_ylabel("Rotation [rad]")
+    yaw_plot.legend()
 
 
-    print("ukf_orientations.shape", ukf_orientations.shape)
-    plt.figure(2)
-    plt.subplot(3, 1, 1)
-    plt.plot(time[:T], ukf_orientations[:T, 0],
+
+    quat_fig, (ukf_quat_plot, imu_quat_plot, vicon_quat_plot) = plt.subplots(3, 1) 
+    quat_fig.suptitle("Quat. Comparison: UKF v Calibrated IMU v Vicon")
+
+    ukf_quat_plot.set_title("UKF")
+    ukf_quat_plot.plot(time[:T], ukf_orientations[:T, 0],
              label="w", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 1],
+    ukf_quat_plot.plot(time[:T], ukf_orientations[:T, 1],
              label="x", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 2],
+    ukf_quat_plot.plot(time[:T], ukf_orientations[:T, 2],
              label="y", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 3],
+    ukf_quat_plot.plot(time[:T], ukf_orientations[:T, 3],
              label="z", alpha=0.4)
-    plt.legend()
-    plt.title("UKF Orientation quaternion")
+    ukf_quat_plot.set_xlabel("Time [s]")
+    ukf_quat_plot.set_ylabel("Quat. Component [-]")
+    ukf_quat_plot.legend()
 
-    print("imu_quaternion.shape", imu_quaternion.shape)
-    plt.subplot(3, 1, 2)
-    plt.plot(time[:T], imu_quaternion[:T, 0],
+    imu_quat_plot.set_title("Calibrated IMU")
+    imu_quat_plot.plot(time[:T], imu_quaternion[:T, 0],
              label="w", alpha=0.4)
-    plt.plot(time[:T], imu_quaternion[:T, 1],
+    imu_quat_plot.plot(time[:T], imu_quaternion[:T, 1],
              label="x", alpha=0.4)
-    plt.plot(time[:T], imu_quaternion[:T, 2],
+    imu_quat_plot.plot(time[:T], imu_quaternion[:T, 2],
              label="y", alpha=0.4)
-    plt.plot(time[:T], imu_quaternion[:T, 3],
+    imu_quat_plot.plot(time[:T], imu_quaternion[:T, 3],
              label="z", alpha=0.4)
-    plt.legend()
-    plt.title("IMU Orientation quaternion")
+    imu_quat_plot.set_xlabel("Time [s]")
+    imu_quat_plot.set_ylabel("Quat. Component [-]")
+    imu_quat_plot.legend()
 
-
-    print("vicon_orientations.shape", vicon_orientations.shape)
-    plt.subplot(3, 1, 3)
-    plt.plot(time[:T], vicon_orientations[:T, 0],
+    vicon_quat_plot.set_title("Vicon")
+    vicon_quat_plot.plot(time[:T], vicon_orientations[:T, 0],
              label="w", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 1],
+    vicon_quat_plot.plot(time[:T], vicon_orientations[:T, 1],
              label="x", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 2],
+    vicon_quat_plot.plot(time[:T], vicon_orientations[:T, 2],
              label="y", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 3],
+    vicon_quat_plot.plot(time[:T], vicon_orientations[:T, 3],
              label="z", alpha=0.4)
-    plt.legend()
-    plt.title("Vicon Orientation quaternion")
+    vicon_quat_plot.set_xlabel("Time [s]")
+    vicon_quat_plot.set_ylabel("Quat. Component [-]")
+    vicon_quat_plot.legend()
 
 
 
-
-    plt.figure(3)
-
-    # Mean of quaternion
-    plt.subplot(3, 1, 1)
-    plt.plot(time[:T], ukf_orientations[:T, 0],
+    quat_distribution_fig, (ukf_quat_mean_plot, ukf_quat_cov_plot, 
+                            vicon_quat_mean_plot) = plt.subplots(3, 1)
+    quat_distribution_fig.suptitle("Quaternion Distribution: UKF vs Vicon")
+    
+    ukf_quat_mean_plot.set_title("UKF Quaternion Mean")
+    ukf_quat_mean_plot.plot(time[:T], ukf_orientations[:T, 0],
              label="w", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 1],
+    ukf_quat_mean_plot.plot(time[:T], ukf_orientations[:T, 1],
              label="x", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 2],
+    ukf_quat_mean_plot.plot(time[:T], ukf_orientations[:T, 2],
              label="y", alpha=0.4)
-    plt.plot(time[:T], ukf_orientations[:T, 3],
+    ukf_quat_mean_plot.plot(time[:T], ukf_orientations[:T, 3],
              label="z", alpha=0.4)
-    plt.legend()
-    plt.title("Quaternion Mean from UKF")
+    ukf_quat_mean_plot.set_xlabel("Time [s]")
+    ukf_quat_mean_plot.set_ylabel("Quat. Component [-]")
+    ukf_quat_mean_plot.legend()
 
-    plt.subplot(3, 1, 2)
     signs, abs_slogdets = np.linalg.slogdet(ukf_covariances[:T, :3, :3])
     quat_slogdets = signs * abs_slogdets
 
-    plt.plot(time[:T], quat_slogdets,
+    ukf_quat_cov_plot.set_title("UKF Covariance Signed Log Determinant")
+    ukf_quat_cov_plot.plot(time[:T], quat_slogdets,
              label='slogdet(cov)', alpha=0.4)
-    plt.legend()
-    plt.title("signed log determinant of quaternion covariance from UKF")
+    ukf_quat_cov_plot.set_xlabel("Time [s]")
+    ukf_quat_cov_plot.set_ylabel("Quat. Component [-]")
+    ukf_quat_cov_plot.legend()
 
-    plt.subplot(3, 1, 3)
-    plt.plot(time[:T], vicon_orientations[:T, 0],
+    vicon_quat_mean_plot.plot(time[:T], vicon_orientations[:T, 0],
              label="w", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 1],
+    vicon_quat_mean_plot.plot(time[:T], vicon_orientations[:T, 1],
              label="x", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 2],
+    vicon_quat_mean_plot.plot(time[:T], vicon_orientations[:T, 2],
              label="y", alpha=0.4)
-    plt.plot(time[:T], vicon_orientations[:T, 3],
+    vicon_quat_mean_plot.plot(time[:T], vicon_orientations[:T, 3],
              label="z", alpha=0.4)
-    plt.legend()
-    plt.title("Quaternion from Vicon")
+    vicon_quat_mean_plot.set_xlabel("Time [s]")
+    vicon_quat_mean_plot.set_ylabel("Quat. Component [-]")
+    vicon_quat_mean_plot.legend()
 
 
 
-    plt.figure(4)
-    plt.subplot(3, 1, 1)
-    plt.plot(time[:T], ukf_angular_velocities[:T, 0],
+    omega_distribution_fig, (ukf_omega_mean_plot, ukf_omega_cov_plot, 
+                             vicon_omega_mean_plot) = plt.subplots(3, 1)
+    omega_distribution_fig.suptitle("Angular Velocity Distribution: UKF vs Vicon")
+
+    ukf_omega_mean_plot.set_title("UKF Mean")
+    ukf_omega_mean_plot.plot(time[:T], ukf_angular_velocities[:T, 0],
              label="wx", alpha=0.4)
-    plt.plot(time[:T], ukf_angular_velocities[:T, 1],
+    ukf_omega_mean_plot.plot(time[:T], ukf_angular_velocities[:T, 1],
              label="wy", alpha=0.4)
-    plt.plot(time[:T], ukf_angular_velocities[:T, 2],
+    ukf_omega_mean_plot.plot(time[:T], ukf_angular_velocities[:T, 2],
              label="wz", alpha=0.4)
-    plt.legend()
-    plt.title("Angular Velocity Mean from UKF")
+    ukf_omega_mean_plot.set_xlabel("Time [s]", loc='right')
+    ukf_omega_mean_plot.set_ylabel("Angular Velocity [rad/s]")
+    ukf_omega_mean_plot.legend()
 
-    plt.subplot(3, 1, 2)
+    ukf_omega_cov_plot.set_title("UKF Covariance Signed Log Determinant")
     signs, abs_slogdets = np.linalg.slogdet(ukf_covariances[:T, -3:, -3:])
     angular_velocity_slogdets = signs * abs_slogdets
-
-    plt.plot(time[:T], angular_velocity_slogdets,
+    ukf_omega_cov_plot.plot(time[:T], angular_velocity_slogdets,
              label='slogdet(cov)', alpha=0.4)
-    plt.legend()
-    plt.title("signed log determinant of angular velocity covariance from UKF")
+    ukf_omega_cov_plot.set_xlabel("Time [s]")
+    ukf_omega_cov_plot.set_ylabel("Angular Velocity [rad/s]")
+    ukf_omega_cov_plot.legend()
 
-
-    plt.subplot(3, 1, 3)
-    plt.plot(time[:T], vicon_angular_velocities[:T, 0],
+    vicon_omega_mean_plot.set_title("Vicon Mean")
+    vicon_omega_mean_plot.plot(time[:T], vicon_angular_velocities[:T, 0],
              label="wx", alpha=0.4)
-    plt.plot(time[:T], vicon_angular_velocities[:T, 1],
+    vicon_omega_mean_plot.plot(time[:T], vicon_angular_velocities[:T, 1],
              label="wy", alpha=0.4)
-    plt.plot(time[:T], vicon_angular_velocities[:T, 2],
+    vicon_omega_mean_plot.plot(time[:T], vicon_angular_velocities[:T, 2],
              label="wz", alpha=0.4)
-    plt.title("Angular Velocity from Vicon")
+    vicon_omega_mean_plot.set_xlabel("Time [s]")
+    vicon_omega_mean_plot.set_ylabel("Angular Velocity [rad/s]")
+    vicon_omega_mean_plot.legend()
+
+
 
     plt.show()
 
@@ -1176,11 +847,7 @@ def plot(ukf_orientations, ukf_angular_velocities, ukf_covariances, ukf_orientat
 
 
         
-# estimate_rot(1, enable_plot=True, recalibrate=False)
-
-
-# calibrate_gyroscope(1)
-# calibrate_accelerometer(1)
+estimate_rot(1, enable_plot=True, recalibrate=False)
 
 
 
